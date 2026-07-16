@@ -1,5 +1,5 @@
 # Metagenomic_repo
-Bu repo çevrimiçi bir metagenomik rehberi.
+Bu repo çevrimiçi bir metagenomik rehberi. Henüz düzenleme aşamasında.
 
 # **SHOTGUN METAGENOMICS GUIDELINE**
 
@@ -135,7 +135,91 @@ What these tools do:
 1. MetaPhlAn4: Profiles the taxonomic composition of your sample using unique clade-specific marker genes. This method produces very few false positives and runs perfectly on standard computing setups.
 2. HUMAnN3: Tool for characterizing the functional potential of the microbial community. It maps reads to gene families and compiles them into active metabolic pathways, telling what they are capable of doing.
 
+## **Running The Analysis**
 
+After installing the manager, tools and the environments, analysis can be started. Details are explained below.
+
+### Pre Processing
+
+Pre processing starts with quality control and continues with taxonomic profiling based on local (downloaded on PC) computers. To start the analysis, follow the steps below respectively.
+
+#### Quality Control
+
+To get a clean data, checking the reading quality and trimming (if necessary) is crucial. For quality control, FASTQC from Babraham Bioinformatics is recommended. Below is the code for paired ended, multiple samples.
+
+```bash
+mamba activate pre_processing_env
+
+# Define your main project directory
+WORKING_DIR="/path/to/your/project"
+
+# Define where your raw FASTQ files are stored
+RAW_DATA_DIR="${WORKING_DIR}/data/raw_reads"
+
+# Define where you want to save your QC outputs
+QC_OUT_DIR="${WORKING_DIR}/results/qc_reports"
+
+# Define your file suffix (e.g., _R1_001.fastq.gz, _1.fq.gz, etc.)
+FORWARD_SUFFIX="_R1.fastq.gz"
+REVERSE_SUFFIX="_R2.fastq.gz"
+
+# Create the output directory if it doesn't exist
+mkdir -p "${QC_OUT_DIR}"
+
+# Change directory to where your raw reads are
+cd "${RAW_DATA_DIR}"
+
+# Start the loop for each forward read file found
+for FORWARD_FILE in *"${FORWARD_SUFFIX}"; do
+    
+    # Extract the base sample name by removing the suffix
+    # e.g., "sample1_R1.fastq.gz" becomes "sample1"
+    SAMPLE_NAME=$(basename "${FORWARD_FILE}" "${FORWARD_SUFFIX}")
+    
+    # Define the matching reverse file name
+    REVERSE_FILE="${SAMPLE_NAME}${REVERSE_SUFFIX}"
+    
+    # Print a status message to the terminal to track progress
+    echo "=========================================="
+    echo "Processing Quality Control for: ${SAMPLE_NAME}"
+    echo "=========================================="
+    
+    # Run FastQC on both pair-end files
+    fastqc -o "${QC_OUT_DIR}" "${FORWARD_FILE}" "${REVERSE_FILE}"
+    
+done
+```
+To understand how these codes work, you can see the details.
+<details>
+
+### 1. Variables & Paths Setup
+Setting up variables at the beginning of your script makes it incredibly easy to modify later if your file names or directories change.
+
+* **`WORKING_DIR="..."`**: This is main project folder chosen by user. Using a single base folder path prevents you from wiring the direction repeatedly.
+* **`RAW_DATA_DIR="${WORKING_DIR}/data/raw_reads"`**: Tells the script where data is located. The `${WORKING_DIR}` syntax dynamically inserts your main project path here.
+* **`QC_OUT_DIR="${WORKING_DIR}/results/qc_reports"`**: Defines the target directory where FastQC will save your visual reports.
+* **`FORWARD_SUFFIX="_R1.fastq.gz"` and `REVERSE_SUFFIX="_R2.fastq.gz"`**: These define the file name patterns. If your sequencing center names files differently (e.g., `_1.fq.gz` instead of `_R1.fastq.gz`), you need to change it in this line.
+* **`mkdir -p "${QC_OUT_DIR}"`**: The "make direction" command in terminal. The `-p` flag prevents the codes causing an error if the direction already exists.
+
+### 2. The Bash Loop Breakdown
+Instead of manually typing the FastQC command for every single sample, using a `for` loop to automate the process sequentially is recommended.
+
+* **`cd "${RAW_DATA_DIR}"`**: Moves your active terminal session directly into the folder where your raw sequence files live.
+* **`for FORWARD_FILE in *"${FORWARD_SUFFIX}"; do`**: 
+  * The asterisk `*` is used for commanding the terminal to find every file in this folder that ends with the suffix (e.g., `_R1.fastq.gz`) given, and process them one by one. During each turn of the loop, call the current file `FORWARD_FILE`."*
+* **`SAMPLE_NAME=$(basename "${FORWARD_FILE}" "${FORWARD_SUFFIX}")`**:
+  * **`basename`** is a Linux command that strips away folder paths and file extensions. It can be removed if full names are needed present.
+  * This line takes a file like `/path/raw_reads/sample01_R1.fastq.gz`, strips off the suffix `_R1.fastq.gz`, and saves just the clean name `sample01` inside the variable `SAMPLE_NAME`.
+* **`REVERSE_FILE="${SAMPLE_NAME}${REVERSE_SUFFIX}"`**: 
+  * After the clean name is specified (e.g., `sample01`), this line automatically reconstructs the matching reverse read file name by appending the reverse suffix (resulting in `sample01_R2.fastq.gz`).
+* **`echo "Processing Quality Control for: ${SAMPLE_NAME}"`**: 
+  * Prints a clear progress message to your terminal. This is crucial for tracking long-running pipelines so you know exactly which sample is currently being analyzed.
+* **`fastqc -o "${QC_OUT_DIR}" "${FORWARD_FILE}" "${REVERSE_FILE}"`**:
+  * **`fastqc`**: The tool itself. Writing it runs the tool.
+  * **`-o "${QC_OUT_DIR}"`**: Tells FastQC to save the output files inside your predefined QC directory instead of cluttering your raw data folder. -o represents "output".
+  * **`"${FORWARD_FILE}" "${REVERSE_FILE}"`**: Passes both the forward and reverse paired-end files into FastQC for analysis.
+* **`done`**: Tells the terminal that the commands for the current sample are finished, and instructs it to go back to the top of the loop to process the next sample.
+</details>
 
 
 
