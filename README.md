@@ -221,49 +221,222 @@ Instead of manually typing the FastQC command for every single sample, using a `
 * **`done`**: Tells the terminal that the commands for the current sample are finished, and instructs it to go back to the top of the loop to process the next sample.
 </details>
 
+#### Trimming The Samples
+
+After examining the quality reports, it can be seen that some samples are below the threshold quality (usually Q25 or Q28), so trimming is recommended to exlude low-quality reads. Since samples can be either single ended or paired ended; the codes below has options for both, including single and multiple samples for each.
 
 
+```bash
+
+# Make sure your preprocessing environment is active before running these commands:
+conda activate pre_processing_env
+```
+
+> When is trimming necessary?
+> 
+> Check your FastQC reports. If your sequencing data shows high-quality Phred scores (safely above Q28) and no adapter contamination, minimal trimming -or no trimming at all- may be treated as optional depending on your downstream analysis requirements. Hence, a literature review is also recommended to determinate the parameters.
+
+Below is the complete command block for trimming samples, titled with read types and sample number.
+
+> Note: This trimming codes are written for trimmomatic only.
+
+##### 1. Defining Variables & Paths
+
+Define your project directories and adapter paths first to keep your scripts clean and reusable. Defining each type of output in a different folder is recommended to follow the steps and files are recommended.
+
+```bash
+# Define project directories
+WORKING_DIR="/path/to/your/project"
+RAW_DATA_DIR="${WORKING_DIR}/data/raw_reads"
+TRIM_OUT_DIR="${WORKING_DIR}/results/trimmed_reads"
+
+# Define file suffixes
+FORWARD_SUFFIX="_R1.fastq.gz"
+REVERSE_SUFFIX="_R2.fastq.gz"
+SE_SUFFIX=".fastq.gz"
+
+# Define path to the adapter FASTA file (bundled with Trimmomatic/Conda)
+ADAPTERS_PE="${CONDA_PREFIX}/share/trimmomatic/adapters/TruSeq3-PE.fa"
+ADAPTERS_SE="${CONDA_PREFIX}/share/trimmomatic/adapters/TruSeq3-SE.fa"
+
+# Create output folder
+mkdir -p "${TRIM_OUT_DIR}"
+
+```
+##### 2. Running Trimmomatic on a Single Sample
+
+###### Option A: Paired-End Mode (PE)
+
+For paired-end sequencing, Trimmomatic produces four output files: two for reads where both mates survived trimming (paired), and two for reads where one mate failed trimming (unpaired).
+
+```bash
+SAMPLE_NAME="sample_01"
+
+trimmomatic PE -threads 4 \
+  "${RAW_DATA_DIR}/${SAMPLE_NAME}${FORWARD_SUFFIX}" \
+  "${RAW_DATA_DIR}/${SAMPLE_NAME}${REVERSE_SUFFIX}" \
+  "${TRIM_OUT_DIR}/${SAMPLE_NAME}_R1_paired.fq.gz" \
+  "${TRIM_OUT_DIR}/${SAMPLE_NAME}_R1_unpaired.fq.gz" \
+  "${TRIM_OUT_DIR}/${SAMPLE_NAME}_R2_paired.fq.gz" \
+  "${TRIM_OUT_DIR}/${SAMPLE_NAME}_R2_unpaired.fq.gz" \
+  ILLUMINACLIP:"${ADAPTERS_PE}":2:30:10 \
+  LEADING:3 \
+  TRAILING:3 \
+  SLIDINGWINDOW:4:15 \
+  MINLEN:36
+
+```
+
+###### Option B: Single-End Mode (SE)
+
+For single-end data, Trimmomatic takes one input file and generates a single trimmed output file:
+
+```bash
+SAMPLE_NAME="sample_01"
+
+trimmomatic SE -threads 4 \
+  "${RAW_DATA_DIR}/${SAMPLE_NAME}${SE_SUFFIX}" \
+  "${TRIM_OUT_DIR}/${SAMPLE_NAME}_trimmed.fq.gz" \
+  ILLUMINACLIP:"${ADAPTERS_SE}":2:30:10 \
+  LEADING:3 \
+  TRAILING:3 \
+  SLIDINGWINDOW:4:15 \
+  MINLEN:36
+
+```
+
+---
+
+##### 3. Automated Processing for All Samples Using a Loop
+
+###### Option A: Paired-End Loop (PE)
+
+To process an entire paired-end dataset sequentially using consistent quality parameters:
+
+```bash
+cd "${RAW_DATA_DIR}"
+
+for FORWARD_FILE in *"${FORWARD_SUFFIX}"; do
+
+    # Extract base sample identifier
+    SAMPLE_NAME=$(basename "${FORWARD_FILE}" "${FORWARD_SUFFIX}")
+    REVERSE_FILE="${SAMPLE_NAME}${REVERSE_SUFFIX}"
+
+    echo "=========================================="
+    echo "Trimming Paired-End reads for: ${SAMPLE_NAME}"
+    echo "=========================================="
+
+    trimmomatic PE -threads 4 \
+      "${FORWARD_FILE}" \
+      "${REVERSE_FILE}" \
+      "${TRIM_OUT_DIR}/${SAMPLE_NAME}_R1_paired.fq.gz" \
+      "${TRIM_OUT_DIR}/${SAMPLE_NAME}_R1_unpaired.fq.gz" \
+      "${TRIM_OUT_DIR}/${SAMPLE_NAME}_R2_paired.fq.gz" \
+      "${TRIM_OUT_DIR}/${SAMPLE_NAME}_R2_unpaired.fq.gz" \
+      ILLUMINACLIP:"${ADAPTERS_PE}":2:30:10 \
+      LEADING:3 \
+      TRAILING:3 \
+      SLIDINGWINDOW:4:15 \
+      MINLEN:36
+
+done
+
+```
+
+###### Option B: Single-End Loop (SE)
+
+To process an entire single-end dataset sequentially:
+
+```bash
+cd "${RAW_DATA_DIR}"
+
+for SE_FILE in *"${SE_SUFFIX}"; do
+
+    # Extract base sample identifier
+    SAMPLE_NAME=$(basename "${SE_FILE}" "${SE_SUFFIX}")
+
+    echo "=========================================="
+    echo "Trimming Single-End read for: ${SAMPLE_NAME}"
+    echo "=========================================="
+
+    trimmomatic SE -threads 4 \
+      "${SE_FILE}" \
+      "${TRIM_OUT_DIR}/${SAMPLE_NAME}_trimmed.fq.gz" \
+      ILLUMINACLIP:"${ADAPTERS_SE}":2:30:10 \
+      LEADING:3 \
+      TRAILING:3 \
+      SLIDINGWINDOW:4:15 \
+      MINLEN:36
+
+done
+
+```
+To understand how these codes work, you can see the details below.
+
+<Details>
+  
+### 1. Variables & Path Setup Line-by-Line
+
+* **`ADAPTERS_PE="${CONDA_PREFIX}/share/trimmomatic/adapters/TruSeq3-PE.fa"`**:
+* `${CONDA_PREFIX}` is a built-in variable that points to your currently active Conda/Mamba environment folder.
+* This line automatically locates the reference FASTA file containing Illumina adapter sequences that was installed alongside Trimmomatic.
 
 
+* **`mkdir -p "${TRIM_OUT_DIR}"`**: Creates the output directory specified in `${TRIM_OUT_DIR}` if it does not already exist, suppressing errors if it does. mkdir stands for "make direction" while -p is for supressing the error message.
 
 
+### 2. Paired-End Loop Breakdown
+
+* **`cd "${RAW_DATA_DIR}"`**: Navigates your terminal session into the directory where your raw FASTQ files reside.
+* **`for FORWARD_FILE in *"${FORWARD_SUFFIX}"; do`**:
+* Finds every file in the directory matching the forward suffix (e.g., `_R1.fastq.gz`).
+* Repeats the command for each sample, storing the current file path in the variable `${FORWARD_FILE}` during each cycle.
 
 
+* **`SAMPLE_NAME=$(basename "${FORWARD_FILE}" "${FORWARD_SUFFIX}")`**:
+* Uses `basename` to strip away folder paths and the trailing forward suffix.
+* Converts a full filename like `sample01_R1.fastq.gz` into just the clean identifier `sample01`.
 
 
+* **`REVERSE_FILE="${SAMPLE_NAME}${REVERSE_SUFFIX}"`**: Reconstructs the corresponding reverse read filename (e.g., `sample01_R2.fastq.gz`) by combining the clean sample name with the reverse suffix variable.
+* **`echo "=========================================="`**: Prints visual separation lines and status updates in the terminal window to check which sample is executed.
+* **`trimmomatic PE -threads 4`**:
+* **`trimmomatic`**: Calls the main software executable.
+* **`PE`**: Sets the execution mode to **Paired-End** processing.
+* **`-threads 4`**: Restricts CPU allocation to 4 processing cores. This can be changed according to your work station's properties.
 
 
+* **`"${FORWARD_FILE}" "${REVERSE_FILE}"`**: Passes the input raw forward and reverse FASTQ files into the program.
+* **`"${TRIM_OUT_DIR}/${SAMPLE_NAME}_R1_paired.fq.gz"`**: Output file #1. Contains forward reads whose reverse pairs also survived trimming. (Used for downstream analysis).
+* **`"${TRIM_OUT_DIR}/${SAMPLE_NAME}_R1_unpaired.fq.gz"`**: Output file #2. Contains forward reads that passed trimming, but whose matching reverse reads failed.
+* **`"${TRIM_OUT_DIR}/${SAMPLE_NAME}_R2_paired.fq.gz"`**: Output file #3. Contains reverse reads whose forward pairs also survived trimming. (Used for downstream analysis).
+* **`"${TRIM_OUT_DIR}/${SAMPLE_NAME}_R2_unpaired.fq.gz"`**: Output file #4. Contains reverse reads that passed trimming, but whose matching forward reads failed.
+* **`ILLUMINACLIP:"${ADAPTERS_PE}":2:30:10`**:
+* Tells Trimmomatic to search for and clip Illumina adapter sequences using the supplied FASTA file.
+* **`2`**: Allows a maximum of 2 seed mismatches.
+* **`30`**: Specifies the score threshold required to clip adapters in paired reads.
+* **`10`**: Specifies the score threshold required to clip adapters in single reads.
+  
+>**Note**: These values are for example only. Please check the numbers before running the analysis and change if necessary.
 
+* **`LEADING:15`**: Scans the start (5' end) of each read and removes bases if their Phred quality score is below 15.
+* **`TRAILING:15`**: Scans the end (3' end) of each read and removes bases if their Phred quality score is below 15.
+* **`SLIDINGWINDOW:4:15`**:
+* Moves a sliding window of **4 bases** across the read.
+* Cuts the read off permanently at the point where the average quality score inside that 4-base window falls below 15.
+* **`MINLEN:36`**: Evaluates the total length of the read after all trimming steps are applied and discards any read shorter than 36 base pairs.
+* **`done`**: Marks the end of the loop block and moves to the next sample file in the folder.
 
+>**Note**: These values are also for example only. Please check the numbers before running the analysis and change if necessary.
 
+### 3. Single-End Loop Differences Breakdown
 
+* **`for SE_FILE in *"${SE_SUFFIX}"; do`**: Looks for files matching the single-end extension (e.g., `.fastq.gz`) and assigns each to `${SE_FILE}`.
+* **`trimmomatic SE -threads 4`**: Sets the execution mode to **Single-End** processing.
+* **`"${SE_FILE}"`**: Provides the single raw input FASTQ file.
+* **`"${TRIM_OUT_DIR}/${SAMPLE_NAME}_trimmed.fq.gz"`**: Produces a single output file containing all surviving trimmed reads (unpaired files are not created in SE mode).
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+</Details>
 
 
 
