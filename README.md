@@ -13,7 +13,7 @@ This repository is a coding guideline for starters in shotgun metagenomics data 
 
 This pipeline requires specific bioinformatics tools. To ensure all tools run smoothly without library conflicts, using **Conda** or **Mamba** is suggested.
 
-> Mamba works exactly like Conda, yet resolves package dependencies in parallel, completing your installations faster. If Conda is not installed in your computer yet, Mamba is recommended. If you have Conda, you can use the same script with writing "conda" isntead of "mamba".
+> Mamba works exactly like Conda, yet Mamba resolves package dependencies in parallel, completing your installations faster. If Conda is not installed in your computer yet, Mamba is recommended. If you have Conda, you can use the same script with writing "conda" isntead of "mamba".
 
 
 ### Step 1: Initialize your Environment Manager
@@ -437,6 +437,8 @@ To understand how these codes work, you can see the details below.
 * **`"${TRIM_OUT_DIR}/${SAMPLE_NAME}_trimmed.fq.gz"`**: Produces a single output file containing all surviving trimmed reads (unpaired files are not created in SE mode).
 
 </Details>
+
+#### Dehosting The Samples
 
 
 
