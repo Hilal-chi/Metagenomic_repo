@@ -440,5 +440,80 @@ To understand how these codes work, you can see the details below.
 
 #### Dehosting The Samples
 
+##### Assembly Based Profiling
 
+### 1. Defining Variables & Paths
 
+Define your project directories, input read directories, and suffix patterns to keep your scripts structured, reproducible, and easy to adjust. Each sample assembled by metaSPAdes will generate a set of sub-directories, so storing outputs in a dedicated assembly folder is strongly recommended.
+
+```bash
+# Define project directories
+WORKING_DIR="/path/to/your/project"
+INPUT_DIR="${WORKING_DIR}/results/host_removed_reads"   # or /results/trimmed_reads
+ASSEMBLY_OUT_DIR="${WORKING_DIR}/results/assemblies"
+
+# Define file suffixes (matching your upstream QC/host removal outputs)
+FORWARD_SUFFIX="_R1_paired.fq.gz"
+REVERSE_SUFFIX="_R2_paired.fq.gz"
+
+# Create base assembly output directory
+mkdir -p "${ASSEMBLY_OUT_DIR}"
+
+```
+
+---
+
+### 2. metaSPAdes Assembly Code
+
+```bash
+cd "${INPUT_DIR}"
+
+for FORWARD_FILE in *"${FORWARD_SUFFIX}"; do
+
+    # Extract base sample identifier
+    SAMPLE_NAME=$(basename "${FORWARD_FILE}" "${FORWARD_SUFFIX}")
+    REVERSE_FILE="${SAMPLE_NAME}${REVERSE_SUFFIX}"
+
+    # Define sample-specific output subfolder
+    SAMPLE_OUT_DIR="${ASSEMBLY_OUT_DIR}/${SAMPLE_NAME}"
+
+    echo "=========================================="
+    echo "Running metaSPAdes Assembly for: ${SAMPLE_NAME}"
+    echo "=========================================="
+
+    metaspades.py \
+      -1 "${FORWARD_FILE}" \
+      -2 "${REVERSE_FILE}" \
+      -o "${SAMPLE_OUT_DIR}" \
+      -t 8 \
+      -m 64
+
+done
+
+```
+To understand how these codes work, see the details below.
+
+<Details>
+
+#### **Variables & Path Setup**
+
+* **`INPUT_DIR="${WORKING_DIR}/results/host_removed_reads"`**: Points to the directory holding quality-trimmed and human/host-filtered paired FASTQ files.
+* **`ASSEMBLY_OUT_DIR="${WORKING_DIR}/results/assemblies"`**: The destination directory where metaSPAdes will create individual subfolders for each processed sample.
+* **`mkdir -p "${ASSEMBLY_OUT_DIR}"`**: Creates the main assembly output directory if it does not already exist while suppressing warnings if it does.
+
+#### **Paired-End Assembly Loop Breakdown**
+
+* **`cd "${INPUT_DIR}"`**: Moves the active session into the input read directory.
+* **`for FORWARD_FILE in *"${FORWARD_SUFFIX}"; do`**: Iterates over every forward read file matching the specified suffix pattern.
+* **`SAMPLE_NAME=$(basename "${FORWARD_FILE}" "${FORWARD_SUFFIX}")`**: Strips the path and suffix from the filename to isolate the unique sample identifier (e.g., `sample01`).
+* **`REVERSE_FILE="${SAMPLE_NAME}${REVERSE_SUFFIX}"`**: Reconstructs the corresponding reverse read filename.
+* **`SAMPLE_OUT_DIR="${ASSEMBLY_OUT_DIR}/${SAMPLE_NAME}"`**: Generates a dedicated subfolder for each sample (e.g., `results/assemblies/sample01`), preventing metaSPAdes output files from overwriting each other.
+* **`metaspades.py`**: Invokes the metaSPAdes wrapper script designed specifically for metagenomic assembly datasets with uneven species coverage.
+* **`-1 "${FORWARD_FILE}"`**: Passes the paired forward reads (`R1`).
+* **`-2 "${REVERSE_FILE}"`**: Passes the paired reverse reads (`R2`).
+* **`-o "${SAMPLE_OUT_DIR}"`**: Specifies the output directory for all resulting assembly files and logs for the current sample.
+* **`-t 8`**: Allocates 8 CPU threads to the process. Adjust this number according to your server hardware resources.
+* **`-m 64`**: Sets the memory limit to 64 Gigabytes (GB). MetaSPAdes is memory-intensive; ensure this value is scaled to your available system RAM.
+* **`done`**: Concludes the loop and proceeds to assemble the next sample in line.
+
+</Details> 
