@@ -928,32 +928,39 @@ To understand how file aggregation, matrix joining, and mathematical normalizati
 
 ### Assembly Based Profiling
 
-#### Assembling The reads
-
-##### 1. Defining Variables & Paths
+###### 1. Defining Variables & Paths
 
 Define your project directories and suffixes to keep your scripts structured, reproducible, and easy to adjust. Each sample assembled by metaSPAdes will generate a set of sub-directories, so storing outputs in a dedicated assembly folder is strongly recommended.
 
 ```bash
 # Define project directories
 WORKING_DIR="/path/to/your/project"
-INPUT_DIR="${WORKING_DIR}/results/host_removed_reads"   # or /results/trimmed_reads
+INPUT_DIR="${WORKING_DIR}/data/dehost"                 # Path to de-hosted, quality-filtered reads
 ASSEMBLY_OUT_DIR="${WORKING_DIR}/results/assemblies"
+QUAST_OUT_DIR="${WORKING_DIR}/results/quast_reports"
 
-# Define file suffixes (matching your upstream QC/host removal outputs)
-FORWARD_SUFFIX="_R1_paired.fq.gz"
-REVERSE_SUFFIX="_R2_paired.fq.gz"
+# Define file suffixes (matching your upstream host-removal outputs)
+FORWARD_SUFFIX="_R1.dehost.fq.gz"
+REVERSE_SUFFIX="_R2.dehost.fq.gz"
 
-# Create base assembly output directory
-mkdir -p "${ASSEMBLY_OUT_DIR}"
+# Hardware resources
+THREADS=16
+MEM_GB=64
+MIN_CONTIG_LEN=500
+
+# Create base output directories
+mkdir -p "${ASSEMBLY_OUT_DIR}" "${QUAST_OUT_DIR}"
 
 ```
 
-##### 2. metaSPAdes Assembly Code
+---
+
+##### 2. metaSPAdes Assembly & MetaQUAST Assessment Code
 
 ```bash
 cd "${INPUT_DIR}"
 
+# --- Step 1: De Novo Metagenome Assembly ---
 for FORWARD_FILE in *"${FORWARD_SUFFIX}"; do
 
     # Extract base sample identifier
@@ -971,35 +978,492 @@ for FORWARD_FILE in *"${FORWARD_SUFFIX}"; do
       -1 "${FORWARD_FILE}" \
       -2 "${REVERSE_FILE}" \
       -o "${SAMPLE_OUT_DIR}" \
-      -t 8 \
-      -m 64
+      -t "${THREADS}" \
+      -m "${MEM_GB}"
+
+done
+
+# --- Step 2: Assembly Quality Assessment (MetaQUAST) ---
+cd "${ASSEMBLY_OUT_DIR}"
+
+for SAMPLE_DIR in */; do
+
+    # Strip trailing slash to extract sample name
+    SAMPLE_NAME=$(basename "${SAMPLE_DIR}")
+    CONTIGS_FILE="${SAMPLE_DIR}/contigs.fasta"
+    SAMPLE_QUAST_DIR="${QUAST_OUT_DIR}/${SAMPLE_NAME}"
+
+    if [ -f "${CONTIGS_FILE}" ]; then
+        echo "=========================================="
+        echo "Running MetaQUAST for: ${SAMPLE_NAME}"
+        echo "=========================================="
+
+        metaquast.py "${CONTIGS_FILE}" \
+          -o "${SAMPLE_QUAST_DIR}" \
+          -m "${MIN_CONTIG_LEN}" \
+          --threads "${THREADS}" \
+          --max-ref-number 0
+    else
+        echo "Warning: contigs.fasta not found in ${SAMPLE_DIR}, skipping..."
+    fi
 
 done
 
 ```
-To understand how these codes work, see the details below.
 
-<Details>
+To understand how these codes work, see the details below:
+
+<details>
 
 ### **Variables & Path Setup**
 
-* **`INPUT_DIR="${WORKING_DIR}/results/host_removed_reads"`**: Points to the directory holding quality-trimmed and human/host-filtered paired FASTQ files.
-* **`ASSEMBLY_OUT_DIR="${WORKING_DIR}/results/assemblies"`**: The destination directory where metaSPAdes will create individual subfolders for each processed sample.
-* **`mkdir -p "${ASSEMBLY_OUT_DIR}"`**: Creates the main assembly output directory if it does not already exist while suppressing warnings if it does.
+* **`INPUT_DIR="${WORKING_DIR}/data/dehost"`**: Points to the folder containing paired FASTQ reads that have passed quality trimming and host filtering.
+* **`ASSEMBLY_OUT_DIR="${WORKING_DIR}/results/assemblies"`**: The destination directory where metaSPAdes generates isolated subfolders for each sample's assembly output.
+* **`QUAST_OUT_DIR="${WORKING_DIR}/results/quast_reports"`**: The destination directory where MetaQUAST stores assembly metrics, summary tables, and interactive HTML dashboards.
+* **`mkdir -p "${ASSEMBLY_OUT_DIR}" "${QUAST_OUT_DIR}"`**: Creates the assembly and QC directories if they do not exist while suppressing warnings if they do.
 
-### **Paired-End Assembly Loop Breakdown**
 
-* **`cd "${INPUT_DIR}"`**: Moves the active session into the input read directory.
-* **`for FORWARD_FILE in *"${FORWARD_SUFFIX}"; do`**: Iterates over every forward read file matching the specified suffix pattern.
-* **`SAMPLE_NAME=$(basename "${FORWARD_FILE}" "${FORWARD_SUFFIX}")`**: Strips the path and suffix from the filename to isolate the unique sample identifier (e.g., `sample01`).
-* **`REVERSE_FILE="${SAMPLE_NAME}${REVERSE_SUFFIX}"`**: Reconstructs the corresponding reverse read filename.
-* **`SAMPLE_OUT_DIR="${ASSEMBLY_OUT_DIR}/${SAMPLE_NAME}"`**: Generates a dedicated subfolder for each sample (e.g., `results/assemblies/sample01`), preventing metaSPAdes output files from overwriting each other.
-* **`metaspades.py`**: Invokes the metaSPAdes wrapper script designed specifically for metagenomic assembly datasets with uneven species coverage.
-* **`-1 "${FORWARD_FILE}"`**: Passes the paired forward reads (`R1`).
-* **`-2 "${REVERSE_FILE}"`**: Passes the paired reverse reads (`R2`).
-* **`-o "${SAMPLE_OUT_DIR}"`**: Specifies the output directory for all resulting assembly files and logs for the current sample.
-* **`-t 8`**: Allocates 8 CPU threads to the process. Adjust this number according to your server hardware resources.
-* **`-m 64`**: Sets the memory limit to 64 Gigabytes (GB). MetaSPAdes is memory-intensive; ensure this value is scaled to your available system RAM.
-* **`done`**: Concludes the loop and proceeds to assemble the next sample in line.
+### **metaSPAdes Assembly Loop**
 
-</Details> 
+* **`cd "${INPUT_DIR}"`**: Navigates into the de-hosted FASTQ read directory.
+* **`for FORWARD_FILE in *"${FORWARD_SUFFIX}"; do`**: Iterates through every forward read file matching the specified suffix pattern.
+* **`SAMPLE_NAME=$(basename "${FORWARD_FILE}" "${FORWARD_SUFFIX}")`**: Strips directory paths and the forward suffix to extract the clean sample identifier (e.g., `sample01`).
+* **`REVERSE_FILE="${SAMPLE_NAME}${REVERSE_SUFFIX}"`**: Reconstructs the paired reverse read filename.
+* **`SAMPLE_OUT_DIR="${ASSEMBLY_OUT_DIR}/${SAMPLE_NAME}"`**: Sets a unique subfolder per sample (e.g., `results/assemblies/sample01`), preventing output collisions.
+* **`metaspades.py`**: Runs the metagenome-optimized SPAdes assembler designed to resolve uneven coverage depths.
+* **`-1 "${FORWARD_FILE}"` / `-2 "${REVERSE_FILE}"**`: Passes the paired forward (`R1`) and reverse (`R2`) host-filtered reads.
+* **`-o "${SAMPLE_OUT_DIR}"`**: Designates the output directory for assembly graphs, contigs, and logs.
+* **`-t "${THREADS}"`**: Allocates 16 CPU threads to accelerate graph construction.
+* **`-m "${MEM_GB}"`**: Limits memory usage to 64 GB of RAM to prevent out-of-memory errors during assembly.
+
+### **MetaQUAST Assessment Loop**
+
+* **`cd "${ASSEMBLY_OUT_DIR}"`**: Enters the base assembly results directory.
+* **`for SAMPLE_DIR in */; do`**: Loops over each individual sample assembly directory.
+* **`SAMPLE_NAME=$(basename "${SAMPLE_DIR}")`**: Extracts the sample name identifier from the directory path.
+* **`CONTIGS_FILE="${SAMPLE_DIR}/contigs.fasta"`**: Identifies the primary assembled contig file produced by metaSPAdes.
+* **`SAMPLE_QUAST_DIR="${QUAST_OUT_DIR}/${SAMPLE_NAME}"`**: Defines a dedicated report folder for the sample.
+* **`if [ -f "${CONTIGS_FILE}" ]; then ... fi`**: Verifies that the contig assembly exists before initiating quality metrics.
+* **`metaquast.py`**: Executes the metagenome-tailored version of QUAST to evaluate community assemblies.
+* **`-m "${MIN_CONTIG_LEN}"`**: Sets the minimum contig size cutoff (500 bp) to exclude very short, uninformative fragments from length metrics.
+* **`--threads "${THREADS}"`**: Parallelizes alignment and statistical computation.
+* **`--max-ref-number 0`**: Prevents MetaQUAST from attempting to download thousands of reference genomes from NCBI, executing reference-free evaluation to save runtime.
+
+</details>
+
+#### Optional Assembly Branch: Contig-Level Functional & ARG Annotation
+
+##### 1. Defining Variables & Paths
+
+This optional branch predicts open reading frames (ORFs) and profiles antibiotic resistance genes (ARGs) directly across all raw assembled contigs. It catalogs functional genes from low-coverage or fragmented contigs that may not be recovered into final binned genomes.
+
+```bash
+# Define project directories
+WORKING_DIR="/path/to/your/project"
+ASSEMBLY_DIR="${WORKING_DIR}/results/assemblies"
+GENES_OUT_DIR="${WORKING_DIR}/results/genes"
+ARG_OUT_DIR="${WORKING_DIR}/results/arg"
+
+# Reference database path (CARD or functional DB)
+CARD_DB="${WORKING_DIR}/ref/CARD.dmnd"
+
+# Parameters and resources
+THREADS=16
+MIN_ID=70
+EVALUE="1e-5"
+
+# Create output directories
+mkdir -p "${GENES_OUT_DIR}" "${ARG_OUT_DIR}"
+
+```
+
+##### 2. Contig Gene Prediction & ARG Annotation Code
+
+```bash
+cd "${ASSEMBLY_DIR}"
+
+for SAMPLE_DIR in */; do
+
+    # Strip trailing slash to extract sample name
+    SAMPLE_NAME=$(basename "${SAMPLE_DIR}")
+    CONTIGS_FILE="${SAMPLE_DIR}/contigs.fasta"
+
+    # Define output files
+    PROTEIN_FAA="${GENES_OUT_DIR}/${SAMPLE_NAME}.proteins.faa"
+    GENE_FNA="${GENES_OUT_DIR}/${SAMPLE_NAME}.genes.fna"
+    ARG_TSV="${ARG_OUT_DIR}/${SAMPLE_NAME}.blastp.tsv"
+
+    if [ -f "${CONTIGS_FILE}" ]; then
+        echo "=========================================="
+        echo "Predicting Genes (Prodigal) for: ${SAMPLE_NAME}"
+        echo "=========================================="
+
+        prodigal \
+          -i "${CONTIGS_FILE}" \
+          -a "${PROTEIN_FAA}" \
+          -d "${GENE_FNA}" \
+          -p meta
+
+        echo "=========================================="
+        echo "Searching ARGs (DIAMOND BLASTP) for: ${SAMPLE_NAME}"
+        echo "=========================================="
+
+        diamond blastp \
+          -p "${THREADS}" \
+          -q "${PROTEIN_FAA}" \
+          -d "${CARD_DB}" \
+          -o "${ARG_TSV}" \
+          --max-target-seqs 1 \
+          --evalue "${EVALUE}" \
+          --id "${MIN_ID}"
+
+    else
+        echo "Warning: contigs.fasta not found in ${SAMPLE_DIR}, skipping..."
+    fi
+
+done
+
+```
+
+To understand how these codes work, see the details below:
+
+<details> 
+
+### **Variables & Path Setup**
+
+* **`GENES_OUT_DIR="${WORKING_DIR}/results/genes"`**: Directory storing nucleotide gene sequences and translated protein files.
+* **`ARG_OUT_DIR="${WORKING_DIR}/results/arg"`**: Directory storing tabular alignment results from ARG searches.
+* **`CARD_DB="${WORKING_DIR}/ref/CARD.dmnd"`**: Path to the DIAMOND-formatted reference database (e.g., CARD).
+* **`MIN_ID=70`**: Percentage sequence identity threshold required to keep a protein alignment hit.
+* **`EVALUE="1e-5"`**: Statistical significance cutoff to remove spurious matches.
+
+
+### **Gene Prediction & Alignment Loop **
+
+* **`cd "${ASSEMBLY_DIR}"`**: Navigates into the assembly directory containing sample folders.
+* **`prodigal`**: Calls the prokaryotic gene prediction software.
+* **`-i "${CONTIGS_FILE}"`**: Passes the input contigs FASTA file.
+* **`-a "${PROTEIN_FAA}"`**: Directs predicted protein translations to an amino acid FASTA file.
+* **`-d "${GENE_FNA}"`**: Directs predicted gene sequences to a nucleotide FASTA file.
+* **`-p meta`**: Runs Prodigal in metagenomic mode, allowing gene calls on fragmented sequences without single-organism training models.
+* **`diamond blastp`**: Runs high-speed protein-versus-protein alignment against the reference database.
+* **`-p "${THREADS}"`**: Allocates CPU cores to parallelize alignment searches.
+* **`-q "${PROTEIN_FAA}"`**: Uses Prodigal's predicted protein FASTA as the alignment query.
+* **`-d "${CARD_DB}"`**: Sets the target reference database binary.
+* **`-o "${ARG_TSV}"`**: Outputs tabular BLAST results (BLAST format 6).
+* **`--max-target-seqs 1`**: Retains only the single top-scoring hit per protein query.
+
+</details>
+
+#### Binning Workflow: MAG Recovery Pipeline
+
+##### Pre-Processing Contigs & Coverage Preparation
+
+Before binning, contigs shorter than 2,000 bp are filtered out to improve binning accuracy and remove sequence noise. Reads are then mapped to these filtered contigs to generate coordinate-sorted BAM files and calculate contig coverage depth tables.
+
+```bash
+
+mamba activate binning_env
+
+# Define project directories
+WORKING_DIR="/path/to/your/project"
+ASSEMBLY_DIR="${WORKING_DIR}/results/assemblies"
+CLEAN_READS_DIR="${WORKING_DIR}/data/dehost"
+BINNING_OUT_DIR="${WORKING_DIR}/results/binning"
+
+FILTERED_CONTIGS_DIR="${BINNING_OUT_DIR}/1_filtered_contigs"
+MAP_OUT_DIR="${BINNING_OUT_DIR}/2_mapping"
+COV_OUT_DIR="${BINNING_OUT_DIR}/3_coverage"
+
+# File suffixes & thresholds
+FORWARD_SUFFIX="_R1.dehost.fq.gz"
+REVERSE_SUFFIX="_R2.dehost.fq.gz"
+MIN_CONTIG_LEN=2000
+THREADS=16
+
+# Create output directories
+mkdir -p "${FILTERED_CONTIGS_DIR}" "${MAP_OUT_DIR}" "${COV_OUT_DIR}"
+
+```
+
+> ##### 2. Contig Filtering, Mapping & Depth Calculation Code
+
+
+```bash
+
+# --- Step 1: Filter Contigs (>= 2000 bp) ---
+cd "${ASSEMBLY_DIR}"
+
+for SAMPLE_DIR in */; do
+
+    SAMPLE_NAME=$(basename "${SAMPLE_DIR}")
+    INPUT_CONTIGS="${SAMPLE_DIR}/contigs.fasta"
+    OUTPUT_FILTERED="${FILTERED_CONTIGS_DIR}/${SAMPLE_NAME}.contigs.ge2kb.fasta"
+
+    if [ -f "${INPUT_CONTIGS}" ]; then
+        echo "=========================================="
+        echo "Filtering contigs (>= ${MIN_CONTIG_LEN} bp) for: ${SAMPLE_NAME}"
+        echo "=========================================="
+
+        awk -v MINLEN="${MIN_CONTIG_LEN}" '
+            BEGIN {
+                RS=">"; 
+                FS="\n"; 
+                OFS=""
+            }
+            NR > 1 {
+                id = $1;
+                seq = "";
+                for (i = 2; i <= NF; i++) seq = seq $i;
+                if (length(seq) >= MINLEN) {
+                    gsub(/ /, "_", id);
+                    print ">" id "\n" seq "\n";
+                }
+            }
+        ' "${INPUT_CONTIGS}" > "${OUTPUT_FILTERED}"
+    fi
+
+done
+
+# --- Step 2: Read Mapping (Bowtie2 + Samtools) ---
+cd "${FILTERED_CONTIGS_DIR}"
+
+for CONTIG_FILE in *.contigs.ge2kb.fasta; do
+
+    SAMPLE_NAME=$(basename "${CONTIG_FILE}" ".contigs.ge2kb.fasta")
+    R1="${CLEAN_READS_DIR}/${SAMPLE_NAME}${FORWARD_SUFFIX}"
+    R2="${CLEAN_READS_DIR}/${SAMPLE_NAME}${REVERSE_SUFFIX}"
+
+    SAMPLE_INDEX_DIR="${MAP_OUT_DIR}/${SAMPLE_NAME}/bt2index"
+    INDEX_PREFIX="${SAMPLE_INDEX_DIR}/${SAMPLE_NAME}"
+    SORTED_BAM="${MAP_OUT_DIR}/${SAMPLE_NAME}.sorted.bam"
+
+    if [ -f "${R1}" ] && [ -f "${R2}" ]; then
+        echo "=========================================="
+        echo "Mapping reads to filtered contigs for: ${SAMPLE_NAME}"
+        echo "=========================================="
+
+        mkdir -p "${SAMPLE_INDEX_DIR}"
+
+        # Build Bowtie2 index
+        bowtie2-build "${CONTIG_FILE}" "${INDEX_PREFIX}"
+
+        # Align paired reads and sort BAM directly
+        bowtie2 -x "${INDEX_PREFIX}" \
+          -1 "${R1}" \
+          -2 "${R2}" \
+          --sensitive \
+          --no-unal \
+          -p "${THREADS}" | \
+        samtools view -@ "${THREADS}" -bS - | \
+        samtools sort -@ "${THREADS}" -o "${SORTED_BAM}"
+
+        # Index sorted BAM
+        samtools index "${SORTED_BAM}"
+    fi
+
+done
+
+# --- Step 3: Coverage Depth Calculation ---
+cd "${MAP_OUT_DIR}"
+
+for BAM_FILE in *.sorted.bam; do
+
+    SAMPLE_NAME=$(basename "${BAM_FILE}" ".sorted.bam")
+    CONTIG_FILE="${FILTERED_CONTIGS_DIR}/${SAMPLE_NAME}.contigs.ge2kb.fasta"
+    DEPTH_FILE="${COV_OUT_DIR}/${SAMPLE_NAME}_coverage.tsv"
+
+    if [ -f "${CONTIG_FILE}" ]; then
+        echo "=========================================="
+        echo "Calculating Contig Depths for: ${SAMPLE_NAME}"
+        echo "=========================================="
+
+        jgi_summarize_bam_contig_depths \
+          --outputDepth "${DEPTH_FILE}" \
+          --referenceFasta "${CONTIG_FILE}" \
+          "${BAM_FILE}"
+    fi
+
+done
+
+```
+
+To understand how these codes work, see the details below:
+
+<details> 
+  
+### **Variables & Path Setup**
+
+* **`FILTERED_CONTIGS_DIR="${BINNING_OUT_DIR}/1_filtered_contigs"`**: Directory storing assemblies filtered to contigs $\ge 2\text{ kb}$.
+* **`MAP_OUT_DIR="${BINNING_OUT_DIR}/2_mapping"`**: Directory holding Bowtie2 index files, coordinate-sorted BAM files, and BAM indexes (`.bai`).
+* **`COV_OUT_DIR="${BINNING_OUT_DIR}/3_coverage"`**: Directory holding contig coverage depth tables used by downstream binners.
+* **`MIN_CONTIG_LEN=2000`**: Discards short contigs ($<2{,}000\text{ bp}$) lacking sufficient $k$-mer composition signals.
+
+
+### **Pre-Processing Step**
+
+* **`awk -v MINLEN="${MIN_CONTIG_LEN}" ...`**:
+* `RS=">"`: Parses FASTA headers as record boundaries.
+* `gsub(/ /, "_", id)`: Replaces whitespace in contig header IDs with underscores to prevent parsing failures in binning tools.
+* `if (length(seq) >= MINLEN)`: Retains only sequences meeting or exceeding 2,000 bp.
+* **`bowtie2-build "${CONTIG_FILE}" "${INDEX_PREFIX}"`**: Builds FM-indexes from length-filtered contigs to allow rapid read alignment.
+* **`bowtie2 -x "${INDEX_PREFIX}" -1 "${R1}" -2 "${R2}"`**: Maps host-filtered forward and reverse paired reads against the sample-specific contig index.
+* **`--sensitive`**: Uses standard sensitive preset parameters for short-read alignment accuracy.
+* **`--no-unal`**: Omits unaligned read records from the stream to minimize processing overhead.
+* **`samtools view -@ "${THREADS}" -bS - | samtools sort -@ "${THREADS}" -o "${SORTED_BAM}"`**: Converts the SAM data stream to BAM format on the fly and sorts records by genomic coordinates.
+* **`samtools index "${SORTED_BAM}"`**: Generates a `.bai` index file required for fast coordinate retrieval.
+* **`jgi_summarize_bam_contig_depths`**: Parses alignment depths from the coordinate-sorted BAM and produces the contig abundance matrix required by MetaBAT2 and MaxBin2.
+* **`--outputDepth "${DEPTH_FILE}"`**: Designates the final tab-separated coverage output path.
+* **`--referenceFasta "${CONTIG_FILE}"`**: References the length-filtered contigs to verify sequence lengths and headers during coverage estimation.
+
+</details>
+
+
+##### Multi-Tool Binning (MetaBAT2, MaxBin2, CONCOCT)
+
+##### 1. Defining Variables & Paths
+
+Running multiple binners with complementary statistical models maximizes the recovery of distinct Metagenome-Assembled Genomes (MAGs). The raw bin outputs from each tool are saved into dedicated subdirectories before consensus integration with DAS Tool.
+
+```bash
+# Define project directories
+WORKING_DIR="/path/to/your/project"
+BINNING_OUT_DIR="${WORKING_DIR}/results/binning"
+
+FILTERED_CONTIGS_DIR="${BINNING_OUT_DIR}/1_filtered_contigs"
+MAP_OUT_DIR="${BINNING_OUT_DIR}/2_mapping"
+COV_OUT_DIR="${BINNING_OUT_DIR}/3_coverage"
+
+METABAT2_OUT_DIR="${BINNING_OUT_DIR}/4_metabat2"
+MAXBIN2_OUT_DIR="${BINNING_OUT_DIR}/5_maxbin2"
+CONCOCT_OUT_DIR="${BINNING_OUT_DIR}/6_concoct"
+
+# Hardware resources
+THREADS=16
+
+# Create output directories for all three binners
+mkdir -p "${METABAT2_OUT_DIR}" "${MAXBIN2_OUT_DIR}" "${CONCOCT_OUT_DIR}"
+
+```
+
+##### 2. Multi-Tool Binning Script
+
+```bash
+cd "${FILTERED_CONTIGS_DIR}"
+
+for CONTIG_FILE in *.contigs.ge2kb.fasta; do
+
+    SAMPLE_NAME=$(basename "${CONTIG_FILE}" ".contigs.ge2kb.fasta")
+    DEPTH_FILE="${COV_OUT_DIR}/${SAMPLE_NAME}_coverage.tsv"
+    BAM_FILE="${MAP_OUT_DIR}/${SAMPLE_NAME}.sorted.bam"
+
+    # Define sample-specific output directories
+    SAMPLE_METABAT="${METABAT2_OUT_DIR}/${SAMPLE_NAME}"
+    SAMPLE_MAXBIN="${MAXBIN2_OUT_DIR}/${SAMPLE_NAME}"
+    SAMPLE_CONCOCT="${CONCOCT_OUT_DIR}/${SAMPLE_NAME}"
+
+    mkdir -p "${SAMPLE_METABAT}" "${SAMPLE_MAXBIN}" "${SAMPLE_CONCOCT}"
+
+    echo "=========================================="
+    echo "Running Multi-Tool Binning for: ${SAMPLE_NAME}"
+    echo "=========================================="
+
+    # --- Tool 1: MetaBAT2 ---
+    echo "[1/3] Running MetaBAT2..."
+    metabat2 \
+      -i "${CONTIG_FILE}" \
+      -a "${DEPTH_FILE}" \
+      -o "${SAMPLE_METABAT}/${SAMPLE_NAME}.bin" \
+      -m 2000 \
+      -t "${THREADS}" \
+      --unbinned
+
+    # --- Tool 2: MaxBin2 ---
+    echo "[2/3] Running MaxBin2..."
+    run_MaxBin.pl \
+      -contig "${CONTIG_FILE}" \
+      -abund "${DEPTH_FILE}" \
+      -out "${SAMPLE_MAXBIN}/${SAMPLE_NAME}.maxbin" \
+      -thread "${THREADS}"
+
+    # --- Tool 3: CONCOCT ---
+    echo "[3/3] Running CONCOCT..."
+    # 1. Cut contigs into 10kb chunks for accurate compositional modeling
+    cut_up_fasta.py "${CONTIG_FILE}" \
+      -c 10000 \
+      -o 0 \
+      --merge_last \
+      -b "${SAMPLE_CONCOCT}/${SAMPLE_NAME}.bed" > "${SAMPLE_CONCOCT}/${SAMPLE_NAME}.10kb.fa"
+
+    # 2. Generate contig coverage table for the split contigs
+    concoct_coverage_table.py \
+      "${SAMPLE_CONCOCT}/${SAMPLE_NAME}.bed" \
+      "${BAM_FILE}" > "${SAMPLE_CONCOCT}/${SAMPLE_NAME}.concoct_depth.tsv"
+
+    # 3. Run CONCOCT clustering
+    concoct \
+      --composition_file "${SAMPLE_CONCOCT}/${SAMPLE_NAME}.10kb.fa" \
+      --coverage_file "${SAMPLE_CONCOCT}/${SAMPLE_NAME}.concoct_depth.tsv" \
+      -b "${SAMPLE_CONCOCT}/" \
+      -t "${THREADS}"
+
+    # 4. Merge sub-contig clustering back to original contig IDs
+    merge_cut_up_clustering.py \
+      "${SAMPLE_CONCOCT}/clustering_gt1000.csv" > "${SAMPLE_CONCOCT}/${SAMPLE_NAME}_clustering_merged.csv"
+
+    # 5. Extract FASTA bins from clustering results
+    extract_fasta_bins.py \
+      "${CONTIG_FILE}" \
+      "${SAMPLE_CONCOCT}/${SAMPLE_NAME}_clustering_merged.csv" \
+      --output_path "${SAMPLE_CONCOCT}/bins"
+
+done
+
+```
+
+To understand how these codes work, see the details below:
+
+<details> 
+
+### **Variables & Path Setup**
+
+* **`METABAT2_OUT_DIR` / `MAXBIN2_OUT_DIR` / `CONCOCT_OUT_DIR**`: Specific root directories that keep each binner's FASTA files and clustering tables isolated.
+* **`DEPTH_FILE="${COV_OUT_DIR}/${SAMPLE_NAME}_coverage.tsv"`**: The contig abundance matrix generated by `jgi_summarize_bam_contig_depths` in the previous step.
+* **`BAM_FILE="${MAP_OUT_DIR}/${SAMPLE_NAME}.sorted.bam"`**: Coordinate-sorted alignment file required directly by CONCOCT's coverage script.
+
+### **Tool-by-Tool Execution**
+
+* **MetaBAT2:**
+* `-i "${CONTIG_FILE}"`: Target length-filtered FASTA assembly.
+* `-a "${DEPTH_FILE}"`: Contig depth/coverage summary table.
+* `-o "${SAMPLE_METABAT}/${SAMPLE_NAME}.bin"`: Output prefix for generated bin FASTA files (`*.bin.1.fa`, `*.bin.2.fa`, etc.).
+* `-m 2000`: Explicit minimum contig length cutoff (2,000 bp).
+* `--unbinned`: Saves leftover contigs that failed binning thresholds to a dedicated FASTA file.
+
+
+* **MaxBin2:**
+* `-contig "${CONTIG_FILE}"`: Assembly input FASTA.
+* `-abund "${DEPTH_FILE}"`: Abundance depth file.
+* `-out "${SAMPLE_MAXBIN}/${SAMPLE_NAME}.maxbin"`: Base prefix for MaxBin2 output files (produces `*.maxbin.001.fasta`, `*.maxbin.summary`, etc.).
+* `-thread "${THREADS}"`: Allocates CPU threads for Expectation-Maximization clustering.
+
+
+* **CONCOCT:**
+* `cut_up_fasta.py`: Splits long contigs into uniform 10 kb chunks to avoid length-biased composition estimation.
+* `concoct_coverage_table.py`: Computes sample coverage over the 10 kb split fragments using the sorted BAM file.
+* `concoct`: Runs Gaussian mixture model clustering combining tetranucleotide frequency and coverage depth.
+* `merge_cut_up_clustering.py`: Resolves clustered 10 kb chunks back into the original intact contig identifiers.
+* `extract_fasta_bins.py`: Reads the original contig FASTA and writes individual `.fa` bin files into the designated `bins/` folder.
+
+</details>
+
+
+
+
+
+
+
+
+
+
+
