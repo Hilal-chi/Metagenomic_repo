@@ -438,13 +438,501 @@ To understand how these codes work, you can see the details below.
 
 </Details>
 
+
 #### Dehosting The Samples
 
-##### Assembly Based Profiling
+Metagenomic samples derived from host-associated environments (e.g., gut, saliva, skin, or tissue) often contain substantial amounts of host DNA. Dehosting is the process of mapping your sequencing reads against the host reference genome and extracting only the unmapped reads (the authentic microbial DNA) for downstream taxonomic and functional profiling.
 
-### 1. Defining Variables & Paths
+Make sure your preprocessing environment is active before running the commands:
 
-Define your project directories, input read directories, and suffix patterns to keep your scripts structured, reproducible, and easy to adjust. Each sample assembled by metaSPAdes will generate a set of sub-directories, so storing outputs in a dedicated assembly folder is strongly recommended.
+```bash
+conda activate pre_processing_env
+
+```
+
+##### 1. Define Variables & System Paths
+
+Define your project directories, host reference files, and thread allocations first. Using variables keeps the scripts modular and prevents directory path errors.
+
+```bash
+# Define base project directory
+WORKING_DIR="/path/to/your/project"
+
+# Define input and output directories
+READS_DIR="${WORKING_DIR}/results/trimmed_reads"    # Or raw_reads if trimming was skipped
+DEHOST_DIR="${WORKING_DIR}/results/dehosted_reads"
+
+# Define path to the host reference index (.mmi for Minimap2 or .fasta)
+HOST_REF="/path/to/host_reference/host_genome.mmi"
+
+# Define file naming pattern/suffixes
+FORWARD_SUFFIX="_R1_paired.fq.gz"
+REVERSE_SUFFIX="_R2_paired.fq.gz"
+
+# CPU Allocation: Adjust according to your machine (leave 2-4 cores free for system stability)
+THREADS=8
+
+# Create output folder
+mkdir -p "${DEHOST_DIR}"
+
+```
+
+##### 2. Option A: Running Dehosting on a Single Sample (Paired-End)
+
+To process a single sample, pipe the sequence alignment directly into Samtools to filter and sort the unmapped microbial reads without storing massive uncompressed intermediate SAM files:
+
+```bash
+SAMPLE_NAME="sample_01"
+
+echo "=========================================="
+echo "Running Dehosting for: ${SAMPLE_NAME}"
+echo "=========================================="
+
+# 1. Align reads against the host genome and extract unmapped reads
+minimap2 -ax sr -t ${THREADS} "${HOST_REF}" \
+  "${READS_DIR}/${SAMPLE_NAME}${FORWARD_SUFFIX}" \
+  "${READS_DIR}/${SAMPLE_NAME}${REVERSE_SUFFIX}" | \
+samtools view -@ ${THREADS} -b -f 12 -F 256 | \
+samtools sort -@ ${THREADS} -n -o "${DEHOST_DIR}/${SAMPLE_NAME}.unmapped.bam"
+
+# 2. Convert the unmapped BAM back into paired FASTQ files
+bedtools bamtofastq \
+  -i "${DEHOST_DIR}/${SAMPLE_NAME}.unmapped.bam" \
+  -fq "${DEHOST_DIR}/${SAMPLE_NAME}_R1.dehost.fq" \
+  -fq2 "${DEHOST_DIR}/${SAMPLE_NAME}_R2.dehost.fq"
+
+# 3. Compress the resulting FASTQ files to save storage
+gzip "${DEHOST_DIR}/${SAMPLE_NAME}_R1.dehost.fq"
+gzip "${DEHOST_DIR}/${SAMPLE_NAME}_R2.dehost.fq"
+
+# 4. (Optional) Remove the temporary unmapped BAM file
+# rm "${DEHOST_DIR}/${SAMPLE_NAME}.unmapped.bam"
+
+```
+
+##### 3. Option B: Automated Processing for All Samples Using a Loop
+
+To process an entire cohort of samples sequentially:
+
+```bash
+cd "${READS_DIR}"
+
+for FORWARD_FILE in *"${FORWARD_SUFFIX}"; do
+
+    # Extract clean sample identifier
+    SAMPLE_NAME=$(basename "${FORWARD_FILE}" "${FORWARD_SUFFIX}")
+    REVERSE_FILE="${SAMPLE_NAME}${REVERSE_SUFFIX}"
+
+    echo "=========================================="
+    echo "Processing Dehosting for: ${SAMPLE_NAME}"
+    echo "=========================================="
+
+    # Step A: Align and filter out host reads
+    minimap2 -ax sr -t ${THREADS} "${HOST_REF}" \
+      "${FORWARD_FILE}" \
+      "${REVERSE_FILE}" | \
+    samtools view -@ ${THREADS} -b -f 12 -F 256 | \
+    samtools sort -@ ${THREADS} -n -o "${DEHOST_DIR}/${SAMPLE_NAME}.unmapped.bam"
+
+    # Step B: Convert unmapped BAM to paired FASTQ files
+    bedtools bamtofastq \
+      -i "${DEHOST_DIR}/${SAMPLE_NAME}.unmapped.bam" \
+      -fq "${DEHOST_DIR}/${SAMPLE_NAME}_R1.dehost.fq" \
+      -fq2 "${DEHOST_DIR}/${SAMPLE_NAME}_R2.dehost.fq"
+
+    # Step C: Compress the clean microbial reads
+    gzip "${DEHOST_DIR}/${SAMPLE_NAME}_R1.dehost.fq"
+    gzip "${DEHOST_DIR}/${SAMPLE_NAME}_R2.dehost.fq"
+
+    # Step D: (Optional) Clean up intermediate BAM files to save disk space
+    rm "${DEHOST_DIR}/${SAMPLE_NAME}.unmapped.bam"
+
+done
+
+```
+
+To understand how these codes work, see the details below:
+
+<details>
+
+### 1. Variable Assignment & Path Syntax
+
+* **`THREADS=8`**: Restricts the maximum number of CPU cores used by the pipeline.
+> *Important:* If your machine has 16 or 32 cores, always leave 2–4 cores free so your operating system does not freeze or crash during intensive alignment tasks.
+* **`HOST_REF="/path/to/reference.mmi"`**: Points to the host reference index file.
+* *Note:* Do not leave spaces around the `=` sign in Bash variable assignments (e.g., `HOST_REF = "..."` will fail). Always wrap file paths in double quotes `""` to prevent path breaking if directory names contain spaces or special characters.
+
+### 2. Alignment & Filtering
+
+The first command chains three tools together using Linux pipes (`|`), passing data in memory without writing massive intermediate files to your storage drive:
+
+* **`minimap2`**: The high-speed alignment software.
+* **`-ax sr`**: `-a` generates output in SAM format; `sr` specifies that the input consists of short paired-end sequencing reads.
+* **`-t ${THREADS}`**: Allocates the specified number of processing threads to the alignment engine.
+* **`"${HOST_REF}"`**: The reference database of the host organism (e.g., Human, Mouse, Avian).
+* **`"${FORWARD_FILE}" "${REVERSE_FILE}"`**: Passes the paired input FASTQ files.
+
+* **`| samtools view -@ ${THREADS} -b -f 12 -F 256`**:
+* **`|` (Pipe)**: Directly sends the output from `minimap2` into `samtools view` in RAM without writing an uncompressed multi-gigabyte SAM file to the disk.
+* **`-@ ${THREADS}`**: Allocates processing threads for compression and filtering.
+* **`-b`**: Directs Samtools to output binary-compressed BAM format instead of plain text SAM.
+* **`-f 12` (Include Flag)**: Extracts read pairs where both read 1 and read 2 failed to align to the host reference.
+* *Flag math:* Bit `4` (Read unmapped) + Bit `8` (Mate unmapped) = Flag `12`. This guarantees that no host fragments remain.
+* **`-F 256` (Exclude Flag)**: Excludes secondary and non-primary alignments to prevent redundant mapping artifacts.
+
+* **`| samtools sort -@ ${THREADS} -n -o "${DEHOST_DIR}/${SAMPLE_NAME}.unmapped.bam"`**:
+* **`samtools sort`**: Sorts the filtered read records.
+* **`-n`**: Sorts reads **by name** rather than by genomic coordinates.
+> ⚠️ *Critical:* `bedtools bamtofastq` requires name-sorted BAM files to properly pair forward (`R1`) and reverse (`R2`) mates back together!
+* **`-o ...`**: Specifies the path and filename for the final sorted BAM output.
+
+### 3. BAM to FASTQ Conversion & Compression
+
+* **`bedtools bamtofastq`**: The conversion utility from Bedtools.
+* **`-i ...unmapped.bam`**: The input unmapped BAM file containing clean microbial reads.
+* **`-fq ..._R1.dehost.fq`**: Output path for the forward microbial reads.
+* **`-fq2 ..._R2.dehost.fq`**: Output path for the reverse microbial reads.
+* **`gzip "${DEHOST_DIR}/${SAMPLE_NAME}_R*.dehost.fq"`**:
+* Metagenomic FASTQ files can quickly reach hundreds of gigabytes.
+* `gzip` compresses the text files into standard `.fq.gz` archives, drastically reducing disk space requirements while remaining directly readable by downstream tools like MetaPhlAn4, HUMAnN3, or Kraken2.
+
+
+* **`rm "${DEHOST_DIR}/${SAMPLE_NAME}.unmapped.bam"`**:
+* Once the reads have been converted back to `.fq.gz` format, the intermediate BAM files are no longer needed. Removing them prevents storage bottlenecks on large cohorts.
+
+</details>
+
+
+#### Taxonomic Profiling with MetaPhlAn4
+
+Now that host-derived genomic sequences have been removed, clean microbial reads are ready for taxonomic classification. MetaPhlAn4 (Metagenomic Phylogenetic Analysis) profiles the composition of microbial communities (Bacteria, Archaea, Eukaryotes, and Viruses) at the species and strain levels using unique clade-specific marker genes.
+
+Make sure your taxonomic profiling environment is active before running these commands:
+```bash
+conda activate biobakery_env
+
+```
+
+##### 1. Define Variables & System Paths
+
+Define your project directories, file suffixes, and core limits first to keep the execution modular and clean:
+
+```bash
+# Define base project directory
+WORKING_DIR="/path/to/your/project"
+
+# Define input and output directories
+DEHOST_DIR="${WORKING_DIR}/results/dehosted_reads"
+TAX_OUT_DIR="${WORKING_DIR}/results/taxonomy_metaphlan"
+
+# Define input file suffixes (clean microbial reads)
+FORWARD_SUFFIX="_R1.dehost.fq.gz"
+REVERSE_SUFFIX="_R2.dehost.fq.gz"
+
+# CPU Allocation: Restrict processor cores to maintain system stability
+NPROC=6
+
+# Create output folder
+mkdir -p "${TAX_OUT_DIR}"
+
+```
+
+##### 2. Running MetaPhlAn4 on a Single Sample (Paired-End)
+
+To profile a single sample, we stream both paired-end files simultaneously using Linux process substitution (`<()`) and `zcat`:
+
+```bash
+SAMPLE_NAME="sample_01"
+
+echo "=========================================="
+echo "Running MetaPhlAn4 for: ${SAMPLE_NAME}"
+echo "=========================================="
+
+metaphlan \
+  --input_type fastq \
+  -t rel_ab_w_read_stats \
+  --nproc ${NPROC} \
+  -o "${TAX_OUT_DIR}/${SAMPLE_NAME}_metaphlan_profile.txt" \
+  <(zcat "${DEHOST_DIR}/${SAMPLE_NAME}${FORWARD_SUFFIX}" \
+         "${DEHOST_DIR}/${SAMPLE_NAME}${REVERSE_SUFFIX}")
+
+```
+
+##### 3. Automated Processing for All Samples Using a Loop
+
+To sequentially analyze an entire batch of dehosted samples:
+
+```bash
+cd "${DEHOST_DIR}"
+
+for FORWARD_FILE in *"${FORWARD_SUFFIX}"; do
+
+    # Extract base sample identifier
+    SAMPLE_NAME=$(basename "${FORWARD_FILE}" "${FORWARD_SUFFIX}")
+    REVERSE_FILE="${SAMPLE_NAME}${REVERSE_SUFFIX}"
+
+    echo "=========================================="
+    echo "Processing taxonomy for: ${SAMPLE_NAME}"
+    echo "=========================================="
+
+    metaphlan \
+      --input_type fastq \
+      -t rel_ab_w_read_stats \
+      --nproc ${NPROC} \
+      -o "${TAX_OUT_DIR}/${SAMPLE_NAME}_metaphlan_profile.txt" \
+      <(zcat "${FORWARD_FILE}" "${REVERSE_FILE}")
+
+done
+
+```
+
+To understand how these codes work, see the details below:
+
+<details> 
+  
+### 1. Setup & Loop Navigation Line-by-Line
+
+* **`cd "${DEHOST_DIR}"`**: Navigates into the folder containing your clean, host-filtered microbial FASTQ files.
+* **`mkdir -p "${TAX_OUT_DIR}"`**: Creates the output directory for taxonomy profiles. The `-p` flag ensures no error is thrown if the directory already exists.
+* **`for FORWARD_FILE in *"${FORWARD_SUFFIX}"; do`**: Iterates through all forward read files in the directory matching the specified suffix pattern.
+* **`SAMPLE_NAME=$(basename "${FORWARD_FILE}" "${FORWARD_SUFFIX}")`**: Strips the path and the forward suffix from the file name, extracting only the base sample identifier (e.g., `sample_01`).
+* **`echo "Processing taxonomy for: ${SAMPLE_NAME}"`**: Prints a progress notification to the terminal to track live execution during lengthy computational runs.
+
+### 2. MetaPhlAn4 Parameters Breakdown
+
+* **`metaphlan`**: Executes the MetaPhlAn software suite.
+* **`--input_type fastq`**: Informs the program that the raw input streams are in standard FASTQ format.
+* **`-t rel_ab_w_read_stats`**:
+* Sets the profiling type to Relative Abundance with Read Statistics.
+* Generates not only the relative percentages of detected taxa but also reports estimated read counts and coverage stats for each clade. These numerical counts are required for downstream statistical models in R (e.g., Phyloseq, MaAsLin2).
+* **`--nproc ${NPROC}`**: Limits the number of CPU processing cores used during alignment to maintain system responsiveness.
+* **`-o "${TAX_OUT_DIR}/${SAMPLE_NAME}_metaphlan_profile.txt"`**: Specifies the exact destination path and file name for the final plain-text taxonomic profile table.
+
+### 3. Streaming Reads with Process Substitution (`zcat` & `<(...)`)
+
+* **`zcat "${FORWARD_FILE}" "${REVERSE_FILE}"`**:
+* Uncompresses and concatenates the forward (`R1`) and reverse (`R2`) files sequentially on-the-fly directly into RAM without decompressing gigabytes of data onto the physical hard drive.
+* **`<(...)` (Process Substitution)**:
+* Creates a temporary Unix file descriptor (a stream pipe in memory) that presents the combined `zcat` output to MetaPhlAn as if it were a single, seamless input file.
+* This bypasses format incompatibility errors that can arise when handling paired-end reads individually.
+
+</details>
+
+
+#### Functional Profiling with HUMAnN3
+
+Now that the taxonomic composition of microbial community determinated, the next step is to profile its metabolic and functional potential. HUMAnN3 (HMP Unified Metabolic Analysis Network 3) characterizes the biological capabilities of a community by mapping cleaned reads to gene families and quantifying complete metabolic pathways (e.g., UniRef gene families, MetaCyc metabolic pathways).
+
+Make sure your functional profiling environment is active before running these commands:
+```bash
+conda activate biobakery_env
+
+```
+
+##### 1. Define Variables, Databases & System Paths
+
+HUMAnN3 relies on three core reference databases (ChocoPhlAn, UniRef, and utility mapping). Define your project directories, database paths, and processor allocations first:
+
+```bash
+# Define base project directory
+WORKING_DIR="/path/to/your/project"
+
+# Define input and output directories
+DEHOST_DIR="${WORKING_DIR}/results/dehosted_reads"
+TAX_DIR="${WORKING_DIR}/results/taxonomy_metaphlan"
+FUNC_OUT_DIR="${WORKING_DIR}/results/functional_humann3"
+
+# Define local paths to HUMAnN3 reference databases
+DB_DIR="/path/to/humann3_databases"
+CHOCOPHLAN_DB="${DB_DIR}/chocophlan"
+UNIREF_DB="${DB_DIR}/uniref"
+UTILITY_DB="${DB_DIR}/utility_mapping"
+
+# Define file naming pattern/suffixes
+FORWARD_SUFFIX="_R1.dehost.fq.gz"
+
+# CPU Allocation: Adjust according to system capacity
+THREADS=8
+
+# Create output folder
+mkdir -p "${FUNC_OUT_DIR}"
+
+```
+
+##### 2. Running HUMAnN3 on a Single Sample
+
+To run functional profiling on a single sample:
+
+```bash
+SAMPLE_NAME="sample_01"
+
+echo "=========================================="
+echo "Running HUMAnN3 for: ${SAMPLE_NAME}"
+echo "=========================================="
+
+humann \
+  --input "${DEHOST_DIR}/${SAMPLE_NAME}${FORWARD_SUFFIX}" \
+  --output "${FUNC_OUT_DIR}/${SAMPLE_NAME}_functional" \
+  --taxonomic-profile "${TAX_DIR}/${SAMPLE_NAME}_metaphlan_profile.txt" \
+  --nucleotide-database "${CHOCOPHLAN_DB}" \
+  --protein-database "${UNIREF_DB}" \
+  --utility-database "${UTILITY_DB}" \
+  --threads ${THREADS}
+
+```
+
+##### 3. Automated Processing for All Samples Using a Loop
+
+To sequentially run functional profiling across all dehosted samples in your dataset:
+
+```bash
+cd "${DEHOST_DIR}"
+
+for FORWARD_FILE in *"${FORWARD_SUFFIX}"; do
+
+    # Extract base sample identifier
+    SAMPLE_NAME=$(basename "${FORWARD_FILE}" "${FORWARD_SUFFIX}")
+
+    echo "============================================="
+    echo "LAUNCHING HUMAnN3 FOR: ${SAMPLE_NAME}"
+    echo "============================================="
+
+    humann \
+      --input "${FORWARD_FILE}" \
+      --output "${FUNC_OUT_DIR}/${SAMPLE_NAME}_functional" \
+      --taxonomic-profile "${TAX_DIR}/${SAMPLE_NAME}_metaphlan_profile.txt" \
+      --nucleotide-database "${CHOCOPHLAN_DB}" \
+      --protein-database "${UNIREF_DB}" \
+      --utility-database "${UTILITY_DB}" \
+      --threads ${THREADS}
+
+done
+
+```
+
+To understand how each parameter, custom database, and paired-end handling option works, expand the details below:
+
+<details> 
+
+### 1. Variables & Database Setup Line-by-Line
+
+* **`CHOCOPHLAN_DB`**: Points to the pangenome nucleotide database (ChocoPhlAn) used for initial tiered mapping.
+* **`UNIREF_DB`**: Points to the protein reference database (e.g., UniRef90 or UniRef50) used for translated homology searches of reads that fail nucleotide-level alignment.
+* **`UTILITY_DB`**: Points to mapping tables that translate raw UniRef IDs into structured metabolic classifications, such as MetaCyc pathways, KEGG Orthologies (KO), or GO terms.
+* **`mkdir -p "${FUNC_OUT_DIR}"`**: Creates the main functional results directory if it does not already exist.
+
+### 2. Script Execution & Input Parsing
+
+* **`for FORWARD_FILE in *"${FORWARD_SUFFIX}"; do`**: Iterates through all clean forward read files matching the target suffix pattern.
+* **`SAMPLE_NAME=$(basename "${FORWARD_FILE}" "${FORWARD_SUFFIX}")`**: Extracts the pure sample identifier (e.g., `sample_01`) from the input file path.
+* **`humann`**: Executes the HUMAnN3 functional quantification workflow.
+* **`--input "${FORWARD_FILE}"`**:
+* Provides the sequencing read input file to the profiler.
+* *Paired-End Processing Note:* When providing the forward (`R1`) paired-end FASTQ file, HUMAnN3 automatically detects and incorporates matching reverse (`R2`) reads residing in the same directory under matching prefix naming schemes.
+
+* **`--output "${FUNC_OUT_DIR}/${SAMPLE_NAME}_functional"`**:
+* Creates an isolated subfolder per sample containing three primary output files:
+1. `*_genefamilies.tsv`: Abundance of individual UniRef gene families.
+2. `*_pathabundance.tsv`: Abundance of complete metabolic pathways.
+3. `*_pathcoverage.tsv`: Coverage/confidence scores (0 to 1) for pathway completeness.
+
+* **`--taxonomic-profile "${TAX_DIR}/${SAMPLE_NAME}_metaphlan_profile.txt"`**:
+* Feeds the custom taxonomic profile generated by MetaPhlAn4 in the previous step into HUMAnN3.
+* *Why this is critical:* Instead of scanning the entire global pangenome database, HUMAnN3 builds a custom, downsized pangenome restricted only to the specific microbial taxa verified to exist in that sample. This reduces processing time and computational memory overhead.
+
+</details>
+
+
+#### 📊 Table Merging & Abundance Normalization
+
+In the previous step, HUMAnN3 generated individual output tables for each sample across isolated subdirectories. To prepare these functional matrices for cross-sample statistical analysis and visualization in R or Python, merging the individual pathway abundance tables into a single cohesive matrix and perform depth-normalization (CPM) is needed.
+
+Make sure your functional profiling environment is active before running these commands:
+
+```bash
+conda activate biobakery_env
+
+```
+
+##### 1. Define Variables & Paths
+
+Define your project directories and cohort identifiers first to keep the commands modular:
+
+```bash
+# Define base project directory and project identifier
+WORKING_DIR="/path/to/your/project"
+PROJECT_NAME="metagenome_project"
+
+# Define functional analysis directories
+FUNC_DIR="${WORKING_DIR}/results/functional_humann3"
+FLAT_DIR="${FUNC_DIR}/flat_tables"
+
+# Create a staging directory to aggregate individual sample tables
+mkdir -p "${FLAT_DIR}"
+
+```
+
+##### 2. Aggregating, Merging & Normalizing Pathway Abundances
+
+Execute the following workflow to stage table files, combine columns into a single matrix, and normalize sequencing depth across all samples:
+
+```bash
+# 1. Copy all individual sample pathway abundance tables into the staging directory
+cp "${FUNC_DIR}"/*_functional/*_pathabundance.tsv "${FLAT_DIR}/"
+
+# 2. Merge individual pathway abundance tables into a single matrix
+humann_join_tables \
+  --input "${FLAT_DIR}" \
+  --output "${FUNC_DIR}/${PROJECT_NAME}_pathabundance_merged.tsv" \
+  --file_name "pathabundance"
+
+# 3. Normalize raw abundance counts to Copies Per Million (CPM)
+humann_renorm_table \
+  --input "${FUNC_DIR}/${PROJECT_NAME}_pathabundance_merged.tsv" \
+  --output "${FUNC_DIR}/${PROJECT_NAME}_pathabundance_normalized_cpm.tsv" \
+  --units cpm
+
+```
+
+To understand how file aggregation, matrix joining, and mathematical normalization work, see the details below:
+
+<details> 
+
+### 1. File Aggregation & Staging
+
+* **`mkdir -p "${FLAT_DIR}"`**: Creates an intermediate staging directory (`flat_tables`). Isolating target tables in a dedicated folder ensures downstream merging tools process only relevant files.
+* **`cp "${FUNC_DIR}"/*_functional/*_pathabundance.tsv "${FLAT_DIR}/"`**:
+* **`cp`**: The standard Unix file copy utility.
+* **`*` (Wildcard)**: Matches any character string. HUMAnN3 outputs results into isolated subdirectories (e.g., `sample_01_functional/`, `sample_02_functional/`). This command collects all `*_pathabundance.tsv` files across every sample subdirectory and places copies in the staging directory in a single operation.
+
+
+### 2. Table Joining (`humann_join_tables`)
+
+* **`humann_join_tables`**: A utility bundled within the HUMAnN3 suite designed to align tabular outputs across multiple samples. It matches identical gene family or pathway identifiers across files and aligns samples side-by-side as adjacent columns.
+* **`--input "${FLAT_DIR}"`**: Specifies the directory containing the individual per-sample `.tsv` tables to be joined.
+* **`--output "${FUNC_DIR}/${PROJECT_NAME}_pathabundance_merged.tsv"`**: Defines the target location and file name for the resulting merged multi-sample count matrix.
+* **`--file_name "pathabundance"`**: Acts as an inclusion filter. It instructs the script to merge only files whose names include the string `pathabundance`, ignoring any unrelated temporary or intermediate files present in the folder.
+
+---
+
+### 3. Depth Normalization (`humann_renorm_table`)
+
+* **`humann_renorm_table`**: A utility that rescales raw read-count abundance estimates to standardize sequencing depth variations across samples.
+* **`--input ..._merged.tsv`**: Provides the unnormalized, merged raw abundance matrix as input.
+* **`--output ..._normalized_cpm.tsv`**: Designates the final destination path for the normalized pathway matrix.
+* **`--units cpm`**:
+* Directs the software to compute **Copies Per Million (CPM)**.
+* **Why Normalization is Essential:** Sequencing depth naturally fluctuates across library preparations and sequencing lanes. A sample sequenced to a depth of 40 million microbial reads will show roughly twice the raw counts for a metabolic pathway compared to a sample sequenced to 20 million reads, even if the underlying biological activity is identical. Rescaling each sample's total abundance sum to 1,000,000 (CPM) removes library-size artifacts and ensures data is ready for downstream statistical testing and visualization in R or Python.
+
+</details>
+
+### Assembly Based Profiling
+
+#### Assembling The reads
+
+##### 1. Defining Variables & Paths
+
+Define your project directories and suffixes to keep your scripts structured, reproducible, and easy to adjust. Each sample assembled by metaSPAdes will generate a set of sub-directories, so storing outputs in a dedicated assembly folder is strongly recommended.
 
 ```bash
 # Define project directories
@@ -461,9 +949,7 @@ mkdir -p "${ASSEMBLY_OUT_DIR}"
 
 ```
 
----
-
-### 2. metaSPAdes Assembly Code
+##### 2. metaSPAdes Assembly Code
 
 ```bash
 cd "${INPUT_DIR}"
@@ -495,13 +981,13 @@ To understand how these codes work, see the details below.
 
 <Details>
 
-#### **Variables & Path Setup**
+### **Variables & Path Setup**
 
 * **`INPUT_DIR="${WORKING_DIR}/results/host_removed_reads"`**: Points to the directory holding quality-trimmed and human/host-filtered paired FASTQ files.
 * **`ASSEMBLY_OUT_DIR="${WORKING_DIR}/results/assemblies"`**: The destination directory where metaSPAdes will create individual subfolders for each processed sample.
 * **`mkdir -p "${ASSEMBLY_OUT_DIR}"`**: Creates the main assembly output directory if it does not already exist while suppressing warnings if it does.
 
-#### **Paired-End Assembly Loop Breakdown**
+### **Paired-End Assembly Loop Breakdown**
 
 * **`cd "${INPUT_DIR}"`**: Moves the active session into the input read directory.
 * **`for FORWARD_FILE in *"${FORWARD_SUFFIX}"; do`**: Iterates over every forward read file matching the specified suffix pattern.
