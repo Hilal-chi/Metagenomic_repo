@@ -724,6 +724,7 @@ To understand how these codes work, see the details below:
 Now that the taxonomic composition of microbial community determinated, the next step is to profile its metabolic and functional potential. HUMAnN3 (HMP Unified Metabolic Analysis Network 3) characterizes the biological capabilities of a community by mapping cleaned reads to gene families and quantifying complete metabolic pathways (e.g., UniRef gene families, MetaCyc metabolic pathways).
 
 Make sure your functional profiling environment is active before running these commands:
+
 ```bash
 conda activate biobakery_env
 
@@ -761,7 +762,7 @@ mkdir -p "${FUNC_OUT_DIR}"
 
 ##### 2. Running HUMAnN3 on a Single Sample
 
-To run functional profiling on a single sample:
+To run functional profiling on a single sample, type the code below:
 
 ```bash
 SAMPLE_NAME="sample_01"
@@ -810,7 +811,7 @@ done
 
 ```
 
-To understand how each parameter, custom database, and paired-end handling option works, expand the details below:
+To understand how each parameter, custom database, and paired-end handling option work, expand the details below:
 
 <details> 
 
@@ -843,7 +844,7 @@ To understand how each parameter, custom database, and paired-end handling optio
 </details>
 
 
-#### 📊 Table Merging & Abundance Normalization
+#### Table Merging & Abundance Normalization
 
 In the previous step, HUMAnN3 generated individual output tables for each sample across isolated subdirectories. To prepare these functional matrices for cross-sample statistical analysis and visualization in R or Python, merging the individual pathway abundance tables into a single cohesive matrix and perform depth-normalization (CPM) is needed.
 
@@ -856,7 +857,7 @@ conda activate biobakery_env
 
 ##### 1. Define Variables & Paths
 
-Define your project directories and cohort identifiers first to keep the commands modular:
+Define your project directories and cohort identifiers first to keep the commands modular with the codes below:
 
 ```bash
 # Define base project directory and project identifier
@@ -928,6 +929,9 @@ To understand how file aggregation, matrix joining, and mathematical normalizati
 
 ### Assembly Based Profiling
 
+While assembly-free profiling depends on databases, assembly-based profiling depends on *de novo* gene assembly by the similiarity of the read sequences. Because of this, different tools are needed. Below, there are the tools and their codes for assembling the samples.
+
+
 ###### 1. Defining Variables & Paths
 
 Define your project directories and suffixes to keep your scripts structured, reproducible, and easy to adjust. Each sample assembled by metaSPAdes will generate a set of sub-directories, so storing outputs in a dedicated assembly folder is strongly recommended.
@@ -953,9 +957,9 @@ mkdir -p "${ASSEMBLY_OUT_DIR}" "${QUAST_OUT_DIR}"
 
 ```
 
----
-
 ##### 2. metaSPAdes Assembly & MetaQUAST Assessment Code
+
+
 
 ```bash
 cd "${INPUT_DIR}"
@@ -1053,9 +1057,9 @@ To understand how these codes work, see the details below:
 
 #### Optional Assembly Branch: Contig-Level Functional & ARG Annotation
 
-##### 1. Defining Variables & Paths
+This optional branch predicts open reading frames (ORFs) and profiles antibiotic resistance genes (ARGs) directly across all raw assembled contigs. It catalogs functional genes from low-coverage or fragmented contigs that may not be recovered into final binned genomes. If you're aiming to detect resistance genes, this step is necessary. If not, you can skip to the next step.
 
-This optional branch predicts open reading frames (ORFs) and profiles antibiotic resistance genes (ARGs) directly across all raw assembled contigs. It catalogs functional genes from low-coverage or fragmented contigs that may not be recovered into final binned genomes.
+##### 1. Defining Variables & Paths
 
 ```bash
 # Define project directories
@@ -1157,7 +1161,9 @@ To understand how these codes work, see the details below:
 
 #### Binning Workflow: MAG Recovery Pipeline
 
-##### Pre-Processing Contigs & Coverage Preparation
+Now that the contigs are formed and the ARGs are detected (optional step), the next step is binning them. Yet, pre processing contigs before the binning is required. Below is the codes and steps for *de novo* gene assembly.
+
+##### 1. Pre-Processing Contigs & Coverage Preparation
 
 Before binning, contigs shorter than 2,000 bp are filtered out to improve binning accuracy and remove sequence noise. Reads are then mapped to these filtered contigs to generate coordinate-sorted BAM files and calculate contig coverage depth tables.
 
@@ -1226,6 +1232,7 @@ for SAMPLE_DIR in */; do
 done
 
 # --- Step 2: Read Mapping (Bowtie2 + Samtools) ---
+
 cd "${FILTERED_CONTIGS_DIR}"
 
 for CONTIG_FILE in *.contigs.ge2kb.fasta; do
@@ -1299,7 +1306,6 @@ To understand how these codes work, see the details below:
 * **`COV_OUT_DIR="${BINNING_OUT_DIR}/3_coverage"`**: Directory holding contig coverage depth tables used by downstream binners.
 * **`MIN_CONTIG_LEN=2000`**: Discards short contigs ($<2{,}000\text{ bp}$) lacking sufficient $k$-mer composition signals.
 
-
 ### **Pre-Processing Step**
 
 * **`awk -v MINLEN="${MIN_CONTIG_LEN}" ...`**:
@@ -1319,7 +1325,9 @@ To understand how these codes work, see the details below:
 </details>
 
 
-##### Multi-Tool Binning (MetaBAT2, MaxBin2, CONCOCT)
+#### Multi-Tool Binning (MetaBAT2, MaxBin2, CONCOCT)
+
+After preparing the contigs, the binning step can be put on process. Whike you can use only one tool for binning, different tools are recommended for more coverage, since each tool depends on a different algorithm.
 
 ##### 1. Defining Variables & Paths
 
@@ -1369,7 +1377,7 @@ for CONTIG_FILE in *.contigs.ge2kb.fasta; do
     echo "=========================================="
 
     # --- Tool 1: MetaBAT2 ---
-    echo "[1/3] Running MetaBAT2..."
+    echo "Running MetaBAT2..."
     metabat2 \
       -i "${CONTIG_FILE}" \
       -a "${DEPTH_FILE}" \
@@ -1379,7 +1387,7 @@ for CONTIG_FILE in *.contigs.ge2kb.fasta; do
       --unbinned
 
     # --- Tool 2: MaxBin2 ---
-    echo "[2/3] Running MaxBin2..."
+    echo "Running MaxBin2..."
     run_MaxBin.pl \
       -contig "${CONTIG_FILE}" \
       -abund "${DEPTH_FILE}" \
@@ -1387,7 +1395,7 @@ for CONTIG_FILE in *.contigs.ge2kb.fasta; do
       -thread "${THREADS}"
 
     # --- Tool 3: CONCOCT ---
-    echo "[3/3] Running CONCOCT..."
+    echo "Running CONCOCT..."
     # 1. Cut contigs into 10kb chunks for accurate compositional modeling
     cut_up_fasta.py "${CONTIG_FILE}" \
       -c 10000 \
@@ -1457,9 +1465,615 @@ To understand how these codes work, see the details below:
 
 </details>
 
+#### Consensus Bin Refinement — DAS Tool
+
+Different binning tools produce overlapping or conflicting bin partitions. So, DAS Tool integrates the predictions from MetaBAT2, MaxBin2, and CONCOCT using single-copy marker gene scoring to reconstruct non-redundant, high-quality consensus Metagenome-Assembled Genomes (MAGs). Below is the steps for the final refinement.
+
+##### 1. Defining Variables & Paths
+
+```bash
+# Define project directories
+WORKING_DIR="/path/to/your/project"
+BINNING_OUT_DIR="${WORKING_DIR}/results/binning"
+
+FILTERED_CONTIGS_DIR="${BINNING_OUT_DIR}/1_filtered_contigs"
+METABAT2_OUT_DIR="${BINNING_OUT_DIR}/4_metabat2"
+MAXBIN2_OUT_DIR="${BINNING_OUT_DIR}/5_maxbin2"
+CONCOCT_OUT_DIR="${BINNING_OUT_DIR}/6_concoct"
+DASTOOL_OUT_DIR="${BINNING_OUT_DIR}/7_dastool"
+
+# Hardware resources and thresholds
+THREADS=16
+SCORE_THRESHOLD=0.5
+
+# Create base DAS Tool output directory
+mkdir -p "${DASTOOL_OUT_DIR}"
+
+```
+##### 2. DAS Tool Refinement Code
+
+```bash
+cd "${FILTERED_CONTIGS_DIR}"
+
+for CONTIG_FILE in *.contigs.ge2kb.fasta; do
+
+    SAMPLE_NAME=$(basename "${CONTIG_FILE}" ".contigs.ge2kb.fasta")
+    
+    SAMPLE_METABAT="${METABAT2_OUT_DIR}/${SAMPLE_NAME}"
+    SAMPLE_MAXBIN="${MAXBIN2_OUT_DIR}/${SAMPLE_NAME}"
+    SAMPLE_CONCOCT="${CONCOCT_OUT_DIR}/${SAMPLE_NAME}/bins"
+    SAMPLE_DASTOOL="${DASTOOL_OUT_DIR}/${SAMPLE_NAME}"
+
+    mkdir -p "${SAMPLE_DASTOOL}"
+
+    echo "=========================================="
+    echo "Running DAS Tool Consensus Refinement for: ${SAMPLE_NAME}"
+    echo "=========================================="
+
+    # 1. Convert MetaBAT2 FASTA bins to TSV table (contig -> bin)
+    Fasta_to_Contig2Bin.sh \
+      -i "${SAMPLE_METABAT}" \
+      -e fa > "${SAMPLE_DASTOOL}/${SAMPLE_NAME}_metabat2.tsv"
+
+    # 2. Convert MaxBin2 FASTA bins to TSV table (contig -> bin)
+    Fasta_to_Contig2Bin.sh \
+      -i "${SAMPLE_MAXBIN}" \
+      -e fasta > "${SAMPLE_DASTOOL}/${SAMPLE_NAME}_maxbin2.tsv"
+
+    # 3. Convert CONCOCT FASTA bins to TSV table (contig -> bin)
+    Fasta_to_Contig2Bin.sh \
+      -i "${SAMPLE_CONCOCT}" \
+      -e fa > "${SAMPLE_DASTOOL}/${SAMPLE_NAME}_concoct.tsv"
+
+    # 4. Run DAS Tool integration
+    DAS_Tool \
+      -i "${SAMPLE_DASTOOL}/${SAMPLE_NAME}_metabat2.tsv,${SAMPLE_DASTOOL}/${SAMPLE_NAME}_maxbin2.tsv,${SAMPLE_DASTOOL}/${SAMPLE_NAME}_concoct.tsv" \
+      -l metabat2,maxbin2,concoct \
+      -c "${CONTIG_FILE}" \
+      -o "${SAMPLE_DASTOOL}/${SAMPLE_NAME}" \
+      --threads "${THREADS}" \
+      --search_engine diamond \
+      --score_threshold "${SCORE_THRESHOLD}" \
+      --write_bins
+
+done
+
+```
+
+To understand how these codes work, see the details below:
+
+<details> 
+
+### **Variables & Path Setup**
+
+* **`DASTOOL_OUT_DIR="${BINNING_OUT_DIR}/7_dastool"`**: The root directory storing intermediate TSV mappings, single-copy marker gene predictions, and refined consensus MAG FASTA files.
+* **`SCORE_THRESHOLD=0.5`**: Quality score threshold for candidate bins based on bacterial/archaeal single-copy gene presence (ranges from 0.0 to 1.0; 0.5 is standard to filter low-confidence bins).
+
+### **DAS Tool Execution**
+
+* **`Fasta_to_Contig2Bin.sh`**: A utility bundled with DAS Tool that parses individual FASTA bin files and converts them into a standardized two-column TSV mapping contig IDs to bin IDs:
+* `-i`: Path to the directory holding the FASTA bins produced by a specific tool.
+* `-e`: File extension pattern to match (`fa` for MetaBAT2/CONCOCT, `fasta` for MaxBin2).
+* **`DAS_Tool`**: Main consensus integration algorithm.
+* **`-i`**: Comma-separated list of contig-to-bin TSV assignment tables from each binner.
+* **`-l metabat2,maxbin2,concoct`**: Comma-separated labels matching the order of input TSV files.
+* **`-c "${CONTIG_FILE}"`**: Target assembly containing all length-filtered contigs.
+* **`-o "${SAMPLE_DASTOOL}/${SAMPLE_NAME}"`**: Output prefix for generated consensus bins and tabular summaries.
+* **`--threads "${THREADS}"`**: Allocates CPU cores for parallelized marker gene search.
+* **`--search_engine diamond`**: Utilizes DIAMOND for rapid searching of bacterial/archaeal single-copy genes.
+* **`--write_bins`**: Directs DAS Tool to output consensus bins directly into FASTA files under a `${SAMPLE_NAME}_DASTool_bins/` subfolder.
+
+</details> 
+
+#### MAG Quality Assessment & High-Quality Filtering — CheckM2
+
+CheckM2 uses machine-learning models to predict the completeness and contamination of Metagenome-Assembled Genomes (MAGs). High-Quality (HQ) MAGs are selected based on standard thresholds: Completeness $\ge 90\%$ and Contamination $\le 5\%$.
+
+##### 1. Defining Variables & Paths
+
+```bash
+# Define project directories
+WORKING_DIR="/path/to/your/project"
+BINNING_OUT_DIR="${WORKING_DIR}/results/binning"
+
+DASTOOL_OUT_DIR="${BINNING_OUT_DIR}/7_dastool"
+CHECKM2_OUT_DIR="${BINNING_OUT_DIR}/8_checkm2"
+FILTERED_MAGS_DIR="${BINNING_OUT_DIR}/9_MAGs_filtered"
+
+# Thresholds and hardware settings
+THREADS=16
+COMPLETENESS_CUTOFF=90
+CONTAMINATION_CUTOFF=5
+
+# Create output directories
+mkdir -p "${CHECKM2_OUT_DIR}" "${FILTERED_MAGS_DIR}"
+
+```
+
+---
+
+##### 2. CheckM2 Evaluation & MAG Filtering Code
+
+```bash
+cd "${DASTOOL_OUT_DIR}"
+
+for SAMPLE_DIR in */; do
+
+    SAMPLE_NAME=$(basename "${SAMPLE_DIR}")
+    SAMPLE_BINS_DIR="${DASTOOL_OUT_DIR}/${SAMPLE_NAME}/${SAMPLE_NAME}_DASTool_bins"
+    SAMPLE_CHECKM2_DIR="${CHECKM2_OUT_DIR}/${SAMPLE_NAME}"
+
+    if [ -d "${SAMPLE_BINS_DIR}" ] && [ "$(ls -A "${SAMPLE_BINS_DIR}")" ]; then
+        echo "=========================================="
+        echo "Running CheckM2 for: ${SAMPLE_NAME}"
+        echo "=========================================="
+
+        # 1. Evaluate completeness and contamination
+        checkm2 predict \
+          --input "${SAMPLE_BINS_DIR}" \
+          -x fa \
+          --output-directory "${SAMPLE_CHECKM2_DIR}" \
+          --threads "${THREADS}" \
+          --force
+
+        # 2. Filter High-Quality MAGs and copy to dedicated folder
+        REPORT="${SAMPLE_CHECKM2_DIR}/quality_report.tsv"
+
+        if [ -f "${REPORT}" ]; then
+            echo "Filtering High-Quality MAGs for: ${SAMPLE_NAME}"
+            
+            awk -F'\t' -v COMP="${COMPLETENESS_CUTOFF}" -v CONT="${CONTAMINATION_CUTOFF}" \
+              'NR > 1 && $2 >= COMP && $3 <= CONT { print $1 }' "${REPORT}" | while read -r HQ_BIN; do
+                
+                # Copy the selected HQ MAG FASTA
+                cp "${SAMPLE_BINS_DIR}/${HQ_BIN}.fa" "${FILTERED_MAGS_DIR}/${SAMPLE_NAME}_${HQ_BIN}.fa"
+            done
+        fi
+
+    else
+        echo "Warning: No DAS Tool bins found for ${SAMPLE_NAME}, skipping..."
+    fi
+
+done
+
+```
+
+To understand how these codes work, see the details below:
+
+<details> 
+
+### **Variables & Path Setup**
+
+* **`DASTOOL_OUT_DIR="${BINNING_OUT_DIR}/7_dastool"`**: Location where DAS Tool saved consensus bin subdirectories.
+* **`CHECKM2_OUT_DIR="${BINNING_OUT_DIR}/8_checkm2"`**: Root directory where CheckM2 writes prediction tables, diamond hit logs, and model output summaries.
+* **`FILTERED_MAGS_DIR="${BINNING_OUT_DIR}/9_MAGs_filtered"`**: Centralized folder collecting all high-quality MAG FASTA files across all samples for downstream taxonomy and functional profiling.
+* **`COMPLETENESS_CUTOFF=90`** / **`CONTAMINATION_CUTOFF=5`**: Standard criteria for High-Quality draft MAGs (Completeness $\ge 90\%$, Contamination $\le 5\%$).
 
 
+### **CheckM2 & Filtering Execution**
 
+* **`checkm2 predict`**: Invokes the main CheckM2 prediction module.
+* **`--input "${SAMPLE_BINS_DIR}"`**: Points to the folder containing refined FASTA bins from DAS Tool.
+* **`-x fa`**: Specifies the file extension pattern for the input FASTA bin files.
+* **`--output-directory "${SAMPLE_CHECKM2_DIR}"`**: Destination path for CheckM2 reports.
+* **`--threads "${THREADS}"`**: Allocates CPU cores for machine-learning feature extraction and alignment.
+* **`--force`**: Allows overwriting in the output directory if re-running analyses.
+* **`awk -F'\t' ...`**: Parses `quality_report.tsv` :
+  *  Checks column 2 (`Completeness`) and column 3 (`Contamination`).
+  *  Extracts the bin IDs meeting the thresholds.
+* **`cp "${SAMPLE_BINS_DIR}/${HQ_BIN}.fa" ...`**: Copies each high-quality bin to the global `9_MAGs_filtered` directory with the sample name prepended to ensure unique filenames.
+
+</details> 
+
+
+#### MAG-Level Gene Prediction & ARG Annotation — Prodigal & AMRFinderPlus  **(Optional Step, ForARGs Only)**
+
+Once high-quality MAGs are classified, coding sequences (CDS) are predicted for each genome individually using Prodigal in single-genome mode (`-p single`). The resulting protein sequences are then screened for antimicrobial resistance (AMR), stress, and virulence genes using NCBI's AMRFinderPlus.
+
+##### 1. Defining Variables & Paths
+
+
+```bash
+# Define project directories
+WORKING_DIR="/path/to/your/project"
+BINNING_OUT_DIR="${WORKING_DIR}/results/binning"[cite: 1]
+
+FILTERED_MAGS_DIR="${BINNING_OUT_DIR}/9_MAGs_filtered"[cite: 1]
+PRODIGAL_MAG_DIR="${BINNING_OUT_DIR}/11_prodigal"[cite: 1]
+AMRFINDER_MAG_DIR="${BINNING_OUT_DIR}/12_amrfinder"[cite: 1]
+
+# Path to AMRFinderPlus database (optional if set via amrfinder -u)
+AMR_DB="${WORKING_DIR}/ref/amrfinder_db"[cite: 1]
+
+# Hardware resources
+THREADS=16[cite: 1]
+
+# Create output directories
+mkdir -p "${PRODIGAL_MAG_DIR}" "${AMRFINDER_MAG_DIR}"[cite: 1]
+
+```
+##### 2. MAG Gene Prediction & ARG Annotation Code
+
+```bash
+cd "${FILTERED_MAGS_DIR}"
+
+for MAG_FILE in *.fa; do
+
+    [ -f "${MAG_FILE}" ] || continue
+
+    # Extract clean MAG base name
+    MAG_NAME=$(basename "${MAG_FILE}" ".fa")[cite: 1]
+
+    PROTEIN_FAA="${PRODIGAL_MAG_DIR}/${MAG_NAME}.proteins.faa"[cite: 1]
+    GENE_FNA="${PRODIGAL_MAG_DIR}/${MAG_NAME}.genes.fna"[cite: 1]
+    GFF_OUT="${PRODIGAL_MAG_DIR}/${MAG_NAME}.gff"[cite: 1]
+    AMR_OUT="${AMRFINDER_MAG_DIR}/${MAG_NAME}.amrfinder.tsv"[cite: 1]
+
+    echo "=========================================="
+    echo "Processing MAG: ${MAG_NAME}"
+    echo "=========================================="
+
+    # 1. Predict genes per MAG (single-genome mode)
+    echo "[1/2] Running Prodigal gene prediction..."
+    prodigal \
+      -i "${MAG_FILE}" \
+      -a "${PROTEIN_FAA}" \
+      -d "${GENE_FNA}" \
+      -o "${GFF_OUT}" \
+      -p single[cite: 1]
+
+    # 2. Annotate ARGs and virulence factors with AMRFinderPlus
+    echo "[2/2] Running AMRFinderPlus annotation..."
+    amrfinder \
+      --protein "${PROTEIN_FAA}" \
+      --database "${AMR_DB}" \
+      --threads "${THREADS}" \
+      --plus \
+      --output "${AMR_OUT}"[cite: 1]
+
+done
+
+```
+
+To understand how these codes work, see the details below:
+
+<details> 
+
+### **Variables & Path Setup**
+
+* **`PRODIGAL_MAG_DIR="${BINNING_OUT_DIR}/11_prodigal"`**: Destination directory for genome-specific gene models, nucleotide sequences, and protein translations.
+* **`AMRFINDER_MAG_DIR="${BINNING_OUT_DIR}/12_amrfinder"`**: Directory storing tabular AMR/virulence annotation reports for each MAG.
+* **`AMR_DB`**: Path to the curated NCBI AMRFinderPlus reference database files.
+
+### **Execution**
+
+* **`prodigal ... -p single`**:
+* `-i "${MAG_FILE}"`: Target MAG FASTA sequence.
+* `-a "${PROTEIN_FAA}"`: Translated amino acid sequences of all predicted ORFs.
+* `-d "${GENE_FNA}"`: Nucleotide sequences of the predicted genes.
+* `-o "${GFF_OUT}"`: Gene structural coordinates and annotations formatted in standard GFF format.
+* `-p single`: Runs Prodigal in single-genome mode (which trains dynamic translation and codon-usage models specifically for that organism's genome), providing higher accuracy than metagenomic mode (`-p meta`).
+
+* **`amrfinder`**:
+* `--protein "${PROTEIN_FAA}"`: Passes the predicted amino acid FASTA file as the search target.
+* `--database "${AMR_DB}"`: Specifies the local AMRFinderPlus reference database directory.
+* `--threads "${THREADS}"`: Allocates CPU cores for parallelized HMM and BLAST searches.
+* `--plus`: Enables search for virulence factors, biocide resistance, stress response, and metal resistance genes in addition to core antibiotic resistance genes.
+* `--output "${AMR_OUT}"`: Saves the resulting matches into a detailed tab-delimited summary table.
+
+</details> 
+
+#### Linking MAG Taxonomy to ARG Profiles & Summary Integration
+
+This script merges the quality metrics from CheckM2 with the taxonomic classifications from GTDB-Tk to create a master catalog of all recovered MAGs. If you investigated ARGs as well, follow the step 2 as well.
+
+##### 1. Defining Variables & Paths
+
+```bash
+# Define paths
+WORKING_DIR="/path/to/your/project"
+BINNING_OUT_DIR="${WORKING_DIR}/results/binning"
+GTDBTK_OUT_DIR="${BINNING_OUT_DIR}/10_gtdbtk"
+CHECKM2_OUT_DIR="${BINNING_OUT_DIR}/8_checkm2"
+FINAL_SUMMARY_DIR="${BINNING_OUT_DIR}/13_integrated_summary"
+
+mkdir -p "${FINAL_SUMMARY_DIR}"
+
+GTDB_SUMMARY="${GTDBTK_OUT_DIR}/gtdbtk.bac120.summary.tsv"
+MASTER_CATALOG="${FINAL_SUMMARY_DIR}/mag_master_catalog.tsv"
+
+# Aggregate CheckM2 reports across samples
+CHECKM2_ALL="${FINAL_SUMMARY_DIR}/all_samples_checkm2.tsv"
+FIRST=1
+for RPT in "${CHECKM2_OUT_DIR}"/*/quality_report.tsv; do
+    [ -f "${RPT}" ] || continue
+    if [ ${FIRST} -eq 1 ]; then
+        head -n 1 "${RPT}" > "${CHECKM2_ALL}"
+        FIRST=0
+    fi
+    tail -n +2 "${RPT}" >> "${CHECKM2_ALL}"
+done
+
+# Merge CheckM2 Quality with GTDB-Tk Taxonomy
+if [ -f "${GTDB_SUMMARY}" ] && [ -f "${CHECKM2_ALL}" ]; then
+    awk -F'\t' 'BEGIN { OFS="\t" }
+        # Load GTDB-Tk classifications: user_genome -> classification
+        NR == FNR {
+            if (NR > 1) { tax[$1] = $2; }
+            next;
+        }
+        # Process CheckM2 report
+        FNR == 1 {
+            print $0, "GTDB_Taxonomy";
+            next;
+        }
+        {
+            mag = $1;
+            t = (mag in tax) ? tax[mag] : "Unclassified";
+            print $0, t;
+        }
+    ' "${GTDB_SUMMARY}" "${CHECKM2_ALL}" > "${MASTER_CATALOG}"
+    
+    echo "Master MAG catalog generated: ${MASTER_CATALOG}"
+fi
+
+```
+
+
+>##### 2. Join combined AMR table with GTDB-Tk taxonomic classifications **(Optional Step For ARG)**
+
+```
+if [ -f "${GTDB_SUMMARY}" ] && [ -f "${COMBINED_AMR}" ]; then
+
+    awk -F'\t' 'BEGIN { OFS="\t" }
+        # Load GTDB-Tk taxonomy: user_genome -> classification
+        NR == FNR {
+            if (NR > 1) {
+                tax[$1] = $2;
+            }
+            next;
+        }
+        # Process combined AMR table
+        FNR == 1 {
+            print $0, "GTDB_Taxonomy";
+            next;
+        }
+        {
+            mag = $1;
+            t = (mag in tax) ? tax[mag] : "Unclassified";
+            print $0, t;
+        }
+    ' "${GTDB_SUMMARY}" "${COMBINED_AMR}" > "${INTEGRATED_REPORT}"[cite: 1]
+
+    echo "Integration complete: ${INTEGRATED_REPORT}"
+else
+    echo "Warning: Missing GTDB summary or combined AMR file, check previous steps."
+fi
+
+```
+
+To understand how these codes work, see the details below:
+
+<details> 
+
+### **Variables & Path Setup**
+
+* **`FINAL_SUMMARY_DIR="${BINNING_OUT_DIR}/13_integrated_summary"`**: Target folder storing unified multi-sample summary reports and visualization tables.
+* **`GTDB_SUMMARY`**: Points to the GTDB-Tk bacterial taxonomy classification summary file.
+* **`COMBINED_AMR`**: Aggregated table compiling all detected resistance genes across every processed MAG.
+* **`INTEGRATED_REPORT`**: Final integrated master table connecting each ARG hit to its corresponding MAG and taxonomic assignment.
+
+### **Execution**
+
+* **Combining AMRFinderPlus Tables:**
+* Iterates through every `.amrfinder.tsv` file in `12_amrfinder/`.
+* Prepends the specific `MAG_ID` column to the first position of each record while keeping the header intact.
+
+* **Merging with GTDB-Tk Taxonomy via `awk`:**
+  
+* `NR == FNR`: Reads the GTDB summary file first into an associative array `tax[genome_id] = classification`.
+* `FNR == 1`: Appends a new `"GTDB_Taxonomy"` column to the AMR table header.
+* `t = (mag in tax) ? tax[mag] : "Unclassified"`: Looks up the taxonomy string matching the `MAG_ID` and defaults to `"Unclassified"` if an exact match is absent (or if classified under `ar53` for archaea).
+* `print $0, t`: Emits the full AMR hit row along with the complete taxonomic classification lineage (Domain down to Species).
+
+</details>
+
+#### Statistical and Ecological Analyses in R (Integrated for Assembly-Free & Assembly-Based)
+
+Since the analysis is done, statistical computations are needed to verify the results. The rest of the analysis will continue in the R language instead of terminal. You can choose the code editor that is suitable for you (VS Code, R Studio, etc.)
+
+This part includes computation within-sample (Alpha) diversity, compositional between-sample (Beta) diversity via PCoA, and constructs co-occurrence network edge lists.
+
+
+##### 1. Library Imports & Global Parameter Definitions
+
+```R
+# Load required R libraries
+library(vegan)
+library(tidyverse)
+
+# Project paths and user configuration
+PROJECT_DIR    <- "/path/to/your/project"
+ANALYSIS_TYPE  <- "assembly_free"  # Options: "assembly_free" or "assembly_based"
+OUTPUT_DIR     <- file.path(PROJECT_DIR, "results/statistics")
+CORR_THRESHOLD <- 0.7              # Minimum absolute correlation threshold for network edges
+
+# Create statistics output directory
+dir.create(OUTPUT_DIR, showWarnings = FALSE, recursive = TRUE)
+
+```
+
+##### 2. Data Ingestion & Matrix Standardization
+
+```R
+if (ANALYSIS_TYPE == "assembly_free") {
+  
+  # --- Scenario A: Assembly-Free (HUMAnN3 / MetaPhlAn TSV) ---
+  input_file <- file.path(PROJECT_DIR, "results/taxa/pathabundance_normalized.tsv")
+  raw_data   <- read.delim(input_file, header = TRUE, sep = "\t", check.names = FALSE)
+  colnames(raw_data)[1] <- "Feature"
+  
+  # Filter unstratified community totals (remove stratified '|' entries and unmapped reads)
+  clean_data <- raw_data %>%
+    filter(!str_detect(Feature, "\\|")) %>%
+    filter(!Feature %in% c("UNMAPPED", "UNINTEGRATED"))
+  
+  # Convert to sample-by-feature matrix (Samples as rows, Features as columns)
+  abundance_matrix <- clean_data %>%
+    column_to_rownames("Feature") %>%
+    t()
+  
+} else if (ANALYSIS_TYPE == "assembly_based") {
+  
+  # --- Scenario B: Assembly-Based (MAG ARG & Taxonomy TSV) ---
+  # Read the integrated MAG AMR and taxonomy report[cite: 1]
+  input_file <- file.path(PROJECT_DIR, "results/binning/13_integrated_summary/mag_amr_with_taxonomy.tsv")
+  raw_data   <- read.delim(input_file, header = TRUE, sep = "\t", check.names = FALSE)
+  
+  # Extract base Sample ID from MAG_ID and generate Sample x Feature frequency matrix[cite: 1]
+  # Example MAG_ID: Sample01_bin.1.fa -> SampleID: Sample01[cite: 1]
+  mag_table <- raw_data %>%
+    mutate(SampleID = str_extract(MAG_ID, "^[^_]+"),
+           Feature  = paste0(Gene_symbol, " (", Element_subtype, ")")) %>%
+    count(SampleID, Feature, name = "Count")
+  
+  # Pivot long table to wide matrix format and fill missing values with 0
+  abundance_matrix <- mag_table %>%
+    pivot_wider(names_from = Feature, values_from = Count, values_fill = 0) %>%
+    column_to_rownames("SampleID") %>%
+    as.matrix()
+}
+
+# Clean trailing file extensions from sample identifiers
+rownames(abundance_matrix) <- gsub("(_R1.*|_Abundance.*|\\.dehost.*)", "", rownames(abundance_matrix))
+
+```
+
+##### 3. Alpha Diversity Estimation & Plotting (Within-Sample Diversity)
+
+```R
+# 1. Calculate Richness, Shannon, and Simpson diversity indices
+alpha_results <- data.frame(
+  SampleID = rownames(abundance_matrix),
+  Richness = specnumber(abundance_matrix),
+  Shannon  = diversity(abundance_matrix, index = "shannon"),
+  Simpson  = diversity(abundance_matrix, index = "simpson")
+)
+
+# 2. Visualize Shannon Diversity
+alpha_plot <- ggplot(alpha_results, aes(x = SampleID, y = Shannon, color = SampleID)) +
+  geom_point(size = 5, stroke = 1.2) +
+  scale_color_brewer(palette = "Set2") +
+  theme_bw(base_size = 14) +
+  labs(title = paste0("Alpha Diversity (", ifelse(ANALYSIS_TYPE == "assembly_free", "Pathways", "MAG ARGs"), ")"),
+       subtitle = "Within-sample diversity (Shannon Index)",
+       x = "Sample Identifier", 
+       y = "Shannon Diversity Score") +
+  theme(legend.position = "none",
+        plot.title = element_text(face = "bold", hjust = 0.5),
+        plot.subtitle = element_text(hjust = 0.5),
+        axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1, face = "bold"))
+
+# Save outputs
+ggsave(file.path(OUTPUT_DIR, paste0(ANALYSIS_TYPE, "_alpha_diversity.png")), 
+       plot = alpha_plot, width = 7, height = 5, dpi = 300)
+write.csv(alpha_results, file.path(OUTPUT_DIR, paste0(ANALYSIS_TYPE, "_alpha_diversity.csv")), row.names = FALSE)
+
+```
+
+---
+
+##### 4. Beta Diversity & Compositional Ordination (PCoA)
+
+```R
+# Method A: Bray-Curtis Space
+bc_dist   <- vegdist(abundance_matrix, method = "bray")
+bc_pcoa   <- cmdscale(bc_dist, k = 2, eig = TRUE)
+bc_coords <- as.data.frame(bc_pcoa$points)
+colnames(bc_coords) <- c("PCoA1", "PCoA2")
+bc_coords$SampleID  <- rownames(bc_coords)
+bc_var    <- round(100 * (bc_pcoa$eig / sum(bc_pcoa$eig)), 1)
+
+# Method B: Aitchison Euclidean Distance over Centered Log-Ratios (CLR)[cite: 1]
+pseudo_counts  <- abundance_matrix + 1
+clr_matrix     <- t(apply(pseudo_counts, 1, function(x) log(x) - mean(log(x))))
+aitchison_dist <- dist(clr_matrix, method = "euclidean")
+aitchison_pcoa <- cmdscale(aitchison_dist, k = 2, eig = TRUE)
+ait_coords     <- as.data.frame(aitchison_pcoa$points)
+colnames(ait_coords) <- c("PC1", "PC2")
+ait_coords$SampleID  <- rownames(ait_coords)
+ait_var        <- round(100 * (aitchison_pcoa$eig / sum(aitchison_pcoa$eig)), 1)
+
+# Visualize Aitchison PCoA
+ait_plot <- ggplot(ait_coords, aes(x = PC1, y = PC2, label = SampleID, color = SampleID)) +
+  geom_point(size = 4) +
+  geom_text(vjust = -1, size = 3.5, show.legend = FALSE) +
+  theme_bw(base_size = 14) +
+  labs(title = paste0("Beta Diversity (Aitchison Space - ", ANALYSIS_TYPE, ")"),
+       subtitle = "PCoA based on CLR-transformed Euclidean Distance",
+       x = paste0("PC1 (", ait_var[1], "%)"),
+       y = paste0("PC2 (", ait_var[2], "%)")) +
+  theme(legend.position = "none",
+        plot.title = element_text(face = "bold", hjust = 0.5),
+        plot.subtitle = element_text(hjust = 0.5))
+
+ggsave(file.path(OUTPUT_DIR, paste0(ANALYSIS_TYPE, "_beta_aitchison_pcoa.png")), 
+       plot = ait_plot, width = 6.5, height = 5.5, dpi = 300)
+
+```
+
+---
+
+##### 5. Co-Occurrence Network Analysis
+
+```R
+# Filter rare or uninformative features across samples
+keep_features   <- colSums(abundance_matrix > 0) >= max(2, ceiling(0.2 * nrow(abundance_matrix)))
+filtered_matrix <- abundance_matrix[, keep_features, drop = FALSE]
+
+if (ncol(filtered_matrix) >= 3) {
+  
+  # CLR Transformation & Pearson Correlation Matrix[cite: 1]
+  pseudo_net  <- filtered_matrix + 1
+  clr_net     <- t(apply(pseudo_net, 1, function(x) log(x) - mean(log(x))))
+  corr_matrix <- cor(clr_net, method = "pearson")
+  
+  # Build Network Edge List
+  edge_list <- as.data.frame(as.table(corr_matrix)) %>%
+    rename(Node_A = Var1, Node_B = Var2, Correlation = Freq) %>%
+    filter(Node_A != Node_B) %>%
+    filter(abs(Correlation) >= CORR_THRESHOLD) %>%
+    mutate(key1 = pmin(as.character(Node_A), as.character(Node_B)),
+           key2 = pmax(as.character(Node_A), as.character(Node_B))) %>%
+    distinct(key1, key2, .keep_all = TRUE) %>%
+    select(Node_A, Node_B, Correlation)
+  
+  # Export network matrices
+  write.csv(corr_matrix, file.path(OUTPUT_DIR, paste0(ANALYSIS_TYPE, "_correlation_matrix.csv")), row.names = TRUE)
+  write.csv(edge_list, file.path(OUTPUT_DIR, paste0(ANALYSIS_TYPE, "_network_edges.csv")), row.names = FALSE)
+  
+  message("Network generation complete: ", nrow(edge_list), " significant edges identified.")
+} else {
+  message("Insufficient variable features found to construct a correlation network.")
+}
+
+```
+
+To understand how these codes work, see the details below:
+
+<details> 
+
+### **Logic & Function Breakdown**
+
+* **`ANALYSIS_TYPE <- "assembly_free" / "assembly_based"`**: Defines the analytical path. It toggles between string filtering for hierarchical tables (HUMAnN3) and `pivot_wider()` aggregation for individual MAG tabular records.
+* **`count(SampleID, Feature)` & `pivot_wider()**`: Aggregates detected ARGs or taxa per sample identifier and pivots long-form data into a sample-by-feature matrix.
+* **`specnumber()` & `diversity(..., index = "shannon")**`: Calculates species/feature richness and Shannon diversity index per sample.
+* **`vegdist(..., method = "bray")` & `cmdscale()**`: Computes pairwise ecological dissimilarities using the Bray-Curtis metric and projects the distance matrix onto 2D coordinate axes (PCoA).
+* **`CLR (Centered Log-Ratio) & dist(..., method = "euclidean")`**: Mitigates compositional sequencing depth bias via log-ratio transformation, deriving the compositional Aitchison distance.
+* **`cor(clr_net, method = "pearson")`**: Computes pairwise Pearson correlation coefficients on CLR-transformed features.
+* **`pmin() / pmax() & distinct()`**: Dereplicates symmetric undirected edges (e.g., A–B vs. B–A) to output a clean edge list formatted for Cytoscape or Gephi.
+
+</details>
 
 
 
