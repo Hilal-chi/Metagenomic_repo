@@ -1,5 +1,5 @@
 # Metagenomic_repo
-Bu repo çevrimiçi bir metagenomik rehberi. Henüz düzenleme aşamasında.
+This repo is a pipeline workflow. Its still under modification.
 
 # **SHOTGUN METAGENOMICS GUIDELINE**
 
