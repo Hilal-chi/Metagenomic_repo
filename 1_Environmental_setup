@@ -7,7 +7,7 @@ This file aimed to guide through environments, packages and tools during the ana
 
 This pipeline requires specific bioinformatics tools. To ensure all tools run smoothly without library conflicts, using **Conda** or **Mamba** is suggested.
 
-> Mamba works exactly like Conda, yet Mamba resolves package dependencies in parallel, completing your installations faster. If Conda is not installed in your computer yet, Mamba is recommended. If you have Conda, you can use the same script with writing "conda" isntead of "mamba".
+> Mamba works exactly like Conda, yet Mamba resolves package dependencies in parallel, completing your installations faster. If Conda is not installed in your computer yet, Mamba is recommended. If you have Conda, you can use the same script with writing "conda" instead of "mamba".
 
 
 ### Step 1: Initialize your Environment Manager
@@ -16,14 +16,24 @@ If you do not have Mamba installed yet, you can install it with running the code
 
 ```bash
 # 1. Download the Miniforge installer script for Linux (x86_64)
-curl -L -O "[https://github.com/conda-forge/miniforge/releases/latest/download/Miniforge3-Linux-x86_64.sh](https://github.com/conda-forge/miniforge/releases/latest/download/Miniforge3-Linux-x86_64.sh)"
+curl -L -O "https://github.com/conda-forge/miniforge/releases/latest/download/Miniforge3-Linux-x86_64.sh"
 
-# 2. Run the installer script
-Miniforge3-Linux-x86_64.sh
+# 2. Install non-interactively into your home folder (no sudo needed)
+bash Miniforge3-Linux-x86_64.sh -b -p "$HOME/miniforge3"
 
-# Note: Press ENTER to read the license, and type 'yes' to accept it. 
-# When asked if you wish to initialize Miniforge3, type 'yes'.
+# 3. Initialize the shell and reload it
+"$HOME/miniforge3/bin/conda" init bash
+source ~/.bashrc
+
+# 4. Install the exact mamba version used in this pipeline
+mamba install -n base -c conda-forge mamba=2.5.0 -y
+
+# 5. Verify (should print 2.5.0)
+mamba --version
 ```
+
+This pipeline was developed and tested with **mamba 2.5.0**.
+
 To understand how these codes work, you can see the details.
 
 <details>
@@ -33,9 +43,23 @@ To understand how these codes work, you can see the details.
    * **`-L`** tells curl to follow any redirects if the webpage has moved.
    * **`-O`** (capital letter O) saves the downloaded file on your computer using its original online name (`Miniforge3-Linux-x86_64.sh`).
 
-3. **`bash Miniforge3-Linux-x86_64.sh`** * This executes the downloaded shell script (`.sh`) using the Bash interpreter to start the interactive installation wizard on your Ubuntu system.
+2. **`bash Miniforge3-Linux-x86_64.sh -b -p "$HOME/miniforge3"`**
+   * **`bash`** runs the downloaded shell script (`.sh`) with the Bash interpreter.
+   * **`-b`** runs the installer in batch mode: it accepts the license and skips all questions.
+   * **`-p "$HOME/miniforge3"`** sets the install location to your home folder, so no `sudo` is needed.
 
-4. **`source ~/.bashrc`** * This reloads your terminal's configuration file (`.bashrc`). It registers the newly installed `mamba` command so you can use it immediately without needing to close and reopen your terminal window.
+3. **`"$HOME/miniforge3/bin/conda" init bash`** and **`source ~/.bashrc`**
+   * **`conda init bash`** adds the startup lines to your `.bashrc` file, so the `conda` and `mamba` commands are available in every new terminal. This replaces the "initialize Miniforge3?" question of the interactive installer.
+   * **`source ~/.bashrc`** reloads your terminal's configuration file (`.bashrc`), so the commands work immediately without closing and reopening the terminal window.
+
+4. **`mamba install -n base -c conda-forge mamba=2.5.0 -y`**
+   * **`-n base`** installs into the base environment, where mamba itself lives.
+   * **`-c conda-forge`** takes the package from the conda-forge channel.
+   * **`mamba=2.5.0`** pins the exact version, so everyone uses the same one. If Miniforge already ships 2.5.0, nothing changes.
+   * **`-y`** answers "yes" to the confirmation question automatically.
+
+5. **`mamba --version`**
+   * Prints the installed version. It should show `2.5.0`.
 
 </details>
 
@@ -43,39 +67,45 @@ To understand how these codes work, you can see the details.
 
 Before downloading any pipeline tools, channels for bioinformatics is needed. This help Mamba & Miniforge to find suitable libraries for the specific tools.
 
-You can install them by running the codes below:
+You can configure the channels with the codes below.
 
 ```bash
 # Add Conda-Forge (hosts general open-source packages)
-mamba config --add channels conda-forge
+conda config --add channels conda-forge
 
 # Add Bioconda (hosts specialized bioinformatics software)
-mamba config --add channels bioconda
+conda config --add channels bioconda
 
-# Set channel priority to strict (ensures stable, fast dependency resolution)
-mamba config --set channel_priority strict
+# Use flexible channel priority (allows mixing channels when a tool needs it)
+conda config --set channel_priority flexible
+
+# Verify
+conda config --show channels channel_priority
 ```
-To understand what these channel configuration commands do, you can see details.
+
+To understand what these commands do, you can see the details.
 
 <details>
-  
-Here is a simple breakdown of what these configuration commands do under the hood:
 
-1. **`mamba config --add channels conda-forge`**
-   * This commands Mamba to add **Conda-Forge** to its search list. Conda-Forge is a massive community repository that contains thousands of general open-source software libraries, compilers, and dependencies. Many biology tools require these underlying libraries to run.
+1. **`conda config --add channels conda-forge`**
+   * Adds **Conda-Forge**, a large community repository of general open-source libraries, compilers and dependencies that many biology tools need.
 
-2. **`mamba config --add channels bioconda`**
-   * This adds **Bioconda** to the search list. Bioconda is a specialized repository maintained by scientists, containing tens of thousands of pre-compiled bioinformatics software packages (including FastQC, Minimap2, and MetaPhlAn4). Without this, Mamba cannot find any biology-specific tools.
+2. **`conda config --add channels bioconda`**
+   * Adds **Bioconda**, a repository of pre-built bioinformatics software (including FastQC, Minimap2 and MetaPhlAn4). Channels added later get higher priority, so Bioconda is searched first, then Conda-Forge.
 
-3. **`mamba config --add channel_priority strict`**
-   * This is a crucial setting that tells Mamba to prioritize the channels in the exact order they are listed. This prevents version conflicts, makes installations incredibly stable, and speeds up download times.
+3. **`conda config --set channel_priority flexible`**
+   * With flexible priority, Mamba prefers the higher-priority channel but may take a package from another channel if that is needed to resolve dependencies. This avoids installation errors for tools with conflicting requirements.
+
+4. **`conda config --show channels channel_priority`**
+   * Prints the current settings. You should see `bioconda`, then `conda-forge`, and `channel_priority: flexible`.
 
 </details>
 
-### Step 3: Creating The Environments and Installing Tools
+
+## Step 3: Creating The Environments and Installing Tools
 During the analysis, different tools may need different versions of programming languages, or some tools may need to run subsequently. To arrange this better, creating working environments are needed. It is recommended to create environments by their purpose (for example: binning, dehosting, pre-processing ect.), yet it can be named by the user's preferences.
 
-#### Pre processing
+### Pre processing
 
 For running the analysis properly, clean and complete data is needed. To achieve this; quality control, trimming and dehosting is necessary. As a frst step, run this code to create the environment and install the tools:
 
@@ -91,15 +121,15 @@ Here's what the tools do,respectively:
 3. Bowtie2: A fast memory-efficient tool used to align your sequencing reads against a host reference genome (e.g., human or host animal) so host DNA can be separated from microbial DNA.
 4. Samtools: A foundational tool used to process, filter, and sort the alignment files (SAM/BAM formats) generated by Bowtie2, allowing to extract only the unmapped (microbial) reads.  
 
-#### Profiling
+### Profiling
 
 Shotgun metagenomics analysis can be done in two ways: Assembly free, which depend on the donwloaded databases and assembly-based,which is a *de novo* gene asembly by binning the reads by their similarities.
 
-##### Assembly-Free (Read-Based) Profiling
+#### Assembly-Free (Read-Based) Profiling
 
 We split this analysis into two distinct paths depending on the tools you wish to use.
 
-###### **Path A: Kraken2 & Bracken Environment (`kraken_env`)**
+##### **Path A: Kraken2 & Bracken Environment (`kraken_env`)**
 
 This environment utilizes a high-speed, k-mer-based approach to classify reads and estimate exact species abundances.
 
